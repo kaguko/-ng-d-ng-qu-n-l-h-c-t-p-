@@ -11,10 +11,12 @@ import {
   formatLong,
   formatShort,
   fromMinutes,
+  nowHHmm,
   toMinutes,
   todayISO,
 } from '@/lib/date';
 import { GeminiError, generatePlan, PlanItem } from '@/lib/gemini';
+import { placeItems } from '@/lib/scheduler';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
 
@@ -39,6 +41,7 @@ export default function Planner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [plan, setPlan] = useState<PlanItem[] | null>(null);
+  const [planNote, setPlanNote] = useState('');
 
   const togglePick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -63,6 +66,9 @@ export default function Planner() {
     }
     setBusy(true);
     try {
+      const existing = tasks
+        .filter((t) => t.date >= start && t.date <= end)
+        .map((t) => ({ date: t.date, start: t.start, duration: t.duration }));
       const items = await generatePlan({
         apiKey,
         model: settings.model,
@@ -75,9 +81,25 @@ export default function Planner() {
         windowEnd: winEnd,
         level,
         notes: notes.trim(),
-        existing: tasks.filter((t) => t.date >= start && t.date <= end).map((t) => ({ date: t.date, start: t.start, duration: t.duration })),
+        existing,
+        now: { date: today, time: nowHHmm() },
       });
-      setPlan(items.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)));
+      // Lưới an toàn: ép lịch của AI thoả khung giờ, không trùng, không quá số giờ/ngày.
+      const { placed, dropped, moved } = placeItems(items, {
+        startDate: start,
+        endDate: end,
+        windowStart: winStart,
+        windowEnd: winEnd,
+        maxMinutesPerDay: Math.round(hours * 60),
+        existing,
+        earliest: { date: today, minute: toMinutes(nowHHmm()) + 10 },
+      });
+      if (!placed.length) throw new GeminiError('Không xếp được buổi nào vào khung giờ bạn chọn. Thử mở rộng ngày hoặc giờ rảnh.');
+      const changes: string[] = [];
+      if (moved) changes.push(`đã tự chỉnh giờ ${moved} buổi cho khỏi trùng`);
+      if (dropped.length) changes.push(`bỏ ${dropped.length} buổi vì không còn chỗ trống`);
+      setPlanNote(changes.length ? `Lumo ${changes.join(', ')}.` : '');
+      setPlan(placed);
     } catch (e) {
       setError(e instanceof GeminiError ? e.message : 'Có lỗi xảy ra, thử lại nhé.');
     } finally {
@@ -123,6 +145,7 @@ export default function Planner() {
         <Title sub={`${plan.length} buổi · ${formatDuration(totalMin)} · ${Object.keys(byDay).length} ngày`}>
           Lịch gợi ý ✨
         </Title>
+        {planNote ? <Text style={{ color: colors.warn, fontSize: 13 }}>{planNote}</Text> : null}
         {Object.entries(byDay).map(([date, items]) => (
           <Card key={date}>
             <Text style={{ color: colors.accent, fontWeight: '800' }}>{formatLong(date)}</Text>

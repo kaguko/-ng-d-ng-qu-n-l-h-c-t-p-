@@ -1,12 +1,15 @@
+import { Ionicons } from '@expo/vector-icons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
+import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { ProgressRing } from '@/components/ProgressRing';
 import { Button, Card, Chip, Screen, Title } from '@/components/ui';
 import { formatDuration, todayISO } from '@/lib/date';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
+import { Task } from '@/types';
 
 const PRESETS = [15, 25, 45, 60];
 const KEEP_AWAKE_TAG = 'lumo-focus';
@@ -19,15 +22,25 @@ const mmss = (ms: number) => {
 };
 
 export default function Focus() {
-  const { subjects, logs, addLog, settings } = useStore();
-  const [minutes, setMinutes] = useState(25);
-  const [subjectId, setSubjectId] = useState<string | null>(null);
+  const { taskId } = useLocalSearchParams<{ taskId?: string }>();
+  const { tasks } = useStore();
+  const task = taskId ? tasks.find((t) => t.id === taskId) : undefined;
+  // key buộc phiên đếm giờ khởi tạo lại khi đổi buổi học được liên kết
+  return <FocusSession key={task?.id ?? 'free'} task={task} />;
+}
+
+function FocusSession({ task }: { task?: Task }) {
+  const { subjects, logs, addLog, updateTask, settings } = useStore();
+  const initial = task ? Math.min(180, Math.max(5, task.duration)) : 25;
+  const [minutes, setMinutes] = useState(initial);
+  const [subjectId, setSubjectId] = useState<string | null>(task?.subjectId ?? null);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [remaining, setRemaining] = useState(25 * 60000);
-  const [justDone, setJustDone] = useState<number | null>(null);
+  const [remaining, setRemaining] = useState(initial * 60000);
+  const [justDone, setJustDone] = useState<{ minutes: number; completed: boolean } | null>(null);
 
   const endAt = useRef(0);
   const totalMs = minutes * 60000;
+  const presets = PRESETS.includes(initial) ? PRESETS : [...PRESETS, initial].sort((a, b) => a - b);
 
   const elapsedMinutes = useCallback(() => Math.floor((totalMs - remaining) / 60000), [totalMs, remaining]);
 
@@ -41,14 +54,15 @@ export default function Focus() {
         setRemaining(0);
         setPhase('idle');
         addLog(minutes, subjectId);
-        setJustDone(minutes);
+        if (task && !task.done) updateTask(task.id, { done: true });
+        setJustDone({ minutes, completed: !!task });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       } else {
         setRemaining(left);
       }
     }, 250);
     return () => clearInterval(id);
-  }, [phase, minutes, subjectId, addLog]);
+  }, [phase, minutes, subjectId, addLog, task, updateTask]);
 
   useEffect(() => {
     if (phase === 'running') activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
@@ -79,7 +93,7 @@ export default function Focus() {
     if (done >= 1) addLog(done, subjectId);
     setPhase('idle');
     setRemaining(totalMs);
-    setJustDone(done >= 1 ? done : null);
+    setJustDone(done >= 1 ? { minutes: done, completed: false } : null);
   };
 
   const today = todayISO();
@@ -88,6 +102,23 @@ export default function Focus() {
   return (
     <Screen>
       <Title sub="Một việc một lúc. Điện thoại cứ để yên.">Tập trung</Title>
+
+      {task ? (
+        <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderColor: colors.accent }}>
+          <Ionicons name="book-outline" size={22} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Đang học</Text>
+            <Text style={{ color: colors.text, fontWeight: '700' }} numberOfLines={2}>
+              {task.title}
+            </Text>
+          </View>
+          {phase === 'idle' && (
+            <Pressable hitSlop={10} onPress={() => router.setParams({ taskId: '' })} accessibilityLabel="Bỏ liên kết">
+              <Ionicons name="close-circle" size={22} color={colors.muted} />
+            </Pressable>
+          )}
+        </Card>
+      ) : null}
 
       <Card style={{ alignItems: 'center', paddingVertical: 28 }}>
         <ProgressRing
@@ -98,19 +129,20 @@ export default function Focus() {
           caption={phase === 'running' ? 'đang tập trung…' : phase === 'paused' ? 'tạm dừng' : 'sẵn sàng'}
         />
         {justDone ? (
-          <Text style={{ color: colors.success, fontWeight: '700', marginTop: 16 }}>
-            🎉 Đã ghi {formatDuration(justDone)} tập trung!
+          <Text style={{ color: colors.success, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
+            🎉 Đã ghi {formatDuration(justDone.minutes)} tập trung
+            {justDone.completed ? ' và hoàn thành buổi học!' : '!'}
           </Text>
         ) : null}
       </Card>
 
       <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center' }}>
-        {PRESETS.map((m) => (
+        {presets.map((m) => (
           <Chip key={m} label={`${m}'`} active={minutes === m} onPress={() => pick(m)} />
         ))}
       </View>
 
-      {phase === 'idle' && subjects.length > 0 && (
+      {phase === 'idle' && subjects.length > 0 && !task && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
           <Chip label="Chung" active={subjectId === null} onPress={() => setSubjectId(null)} />
           {subjects.map((s) => (

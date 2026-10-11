@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { ProgressRing } from '@/components/ProgressRing';
 import { TaskEditor } from '@/components/TaskEditor';
 import { TaskRow } from '@/components/TaskRow';
 import { Button, Card, Empty, ErrorBox, Screen, SectionTitle } from '@/components/ui';
 import { addDays, formatDuration, formatLong, nowHHmm, toMinutes, todayISO, weekdayShort } from '@/lib/date';
 import { GeminiError, rescheduleOverdue } from '@/lib/gemini';
+import { placeItems } from '@/lib/scheduler';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
 import { Task } from '@/types';
@@ -61,20 +62,38 @@ export default function Today() {
     setBusy(true);
     try {
       const overdueIds = new Set(overdue.map((o) => o.id));
-      const result = await rescheduleOverdue({
+      const untilDate = addDays(today, 6);
+      // Mục tiêu tập trung không phải trần cứng: xếp lại cho phép tối thiểu 4 giờ học/ngày.
+      const hoursPerDay = Math.max(4, Math.ceil(settings.dailyGoalMin / 60));
+      const upcoming = tasks
+        .filter((t) => !overdueIds.has(t.id) && t.date >= today && t.date <= untilDate)
+        .map((t) => ({ date: t.date, start: t.start, duration: t.duration }));
+      const suggested = await rescheduleOverdue({
         apiKey,
         model: settings.model,
         today,
         nowTime: now,
-        untilDate: addDays(today, 6),
+        untilDate,
         overdue: overdue.map((o) => ({ id: o.id, title: o.title, duration: o.duration, originalDate: o.date })),
-        upcoming: tasks
-          .filter((t) => !overdueIds.has(t.id) && t.date >= today && t.date <= addDays(today, 6))
-          .map((t) => ({ date: t.date, start: t.start, duration: t.duration })),
-        hoursPerDay: Math.max(2, Math.ceil(settings.dailyGoalMin / 60)),
+        upcoming,
+        hoursPerDay,
       });
-      updateTasks(result.map((r) => ({ id: r.id, patch: { date: r.date, start: r.start } })));
-      setNotice(`Đã xếp lại ${result.length}/${overdue.length} buổi học bị lỡ.`);
+      const byId = new Map(overdue.map((o) => [o.id, o]));
+      const { placed } = placeItems(
+        suggested.map((r) => ({ id: r.id, date: r.date, start: r.start, duration: byId.get(r.id)!.duration })),
+        {
+          startDate: today,
+          endDate: untilDate,
+          windowStart: '06:00',
+          windowEnd: '22:30',
+          maxMinutesPerDay: hoursPerDay * 60,
+          existing: upcoming,
+          earliest: { date: today, minute: toMinutes(now) + 5 },
+        },
+      );
+      if (!placed.length) throw new GeminiError('Không còn chỗ trống trong 7 ngày tới để xếp lại.');
+      updateTasks(placed.map((r) => ({ id: r.id, patch: { date: r.date, start: r.start } })));
+      setNotice(`Đã xếp lại ${placed.length}/${overdue.length} buổi học bị lỡ.`);
     } catch (e) {
       setError(e instanceof GeminiError ? e.message : 'Có lỗi xảy ra, thử lại nhé.');
     } finally {
@@ -148,6 +167,17 @@ export default function Today() {
         </Card>
       )}
 
+      <Pressable onPress={() => router.push('/coach')}>
+        <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Text style={{ fontSize: 28 }}>🧠</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontWeight: '700' }}>Hỏi Lumo</Text>
+            <Text style={{ color: colors.muted, fontSize: 12 }}>Nhận lời khuyên dựa trên lịch và tiến độ của bạn</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </Card>
+      </Pressable>
+
       <SectionTitle>Lịch hôm nay</SectionTitle>
       {todays.length === 0 ? (
         <Card>
@@ -157,7 +187,12 @@ export default function Today() {
       ) : (
         <View style={{ gap: 10 }}>
           {todays.map((t) => (
-            <TaskRow key={t.id} task={t} onPress={() => setEditing(t)} />
+            <TaskRow
+              key={t.id}
+              task={t}
+              onPress={() => setEditing(t)}
+              onStart={() => router.navigate({ pathname: '/focus', params: { taskId: t.id } })}
+            />
           ))}
         </View>
       )}

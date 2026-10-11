@@ -7,7 +7,7 @@ import { useStore } from '@/store';
 import { colors, radius } from '@/theme';
 import { Task } from '@/types';
 
-export function TaskRow({ task, onPress }: { task: Task; onPress?: () => void }) {
+export function TaskRow({ task, onPress, onStart }: { task: Task; onPress?: () => void; onStart?: () => void }) {
   const { toggleTask, subjectOf } = useStore();
   const subject = subjectOf(task.subjectId);
   const accent = subject?.color ?? colors.muted;
@@ -51,6 +51,11 @@ export function TaskRow({ task, onPress }: { task: Task; onPress?: () => void })
           </Text>
         ) : null}
       </View>
+      {onStart && !task.done ? (
+        <Pressable hitSlop={10} onPress={onStart} accessibilityLabel="Học ngay">
+          <Ionicons name="play-circle" size={30} color={colors.accent} />
+        </Pressable>
+      ) : null}
       <Pressable
         hitSlop={10}
         onPress={() => {

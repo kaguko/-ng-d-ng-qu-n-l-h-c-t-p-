@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { addDays, formatLong, fromMinutes, toMinutes } from '@/lib/date';
 import { useStore } from '@/store';
@@ -62,7 +62,7 @@ function EditorForm({ task, defaultDate, onClose }: { task: Task | null; default
   return (
     <>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20 }}>
             <Text style={{ color: colors.text, fontSize: 20, fontWeight: '800' }}>
               {task ? 'Sửa buổi học' : 'Buổi học mới'}
