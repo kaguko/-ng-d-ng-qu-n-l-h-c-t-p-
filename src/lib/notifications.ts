@@ -1,3 +1,4 @@
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 import { fromISO, toMinutes } from '@/lib/date';
 import { Subject, Task } from '@/types';
@@ -8,10 +9,13 @@ const MAX_SCHEDULED = 60;
 
 type NotificationsModule = typeof import('expo-notifications');
 
-// Trên Android, Expo Go (SDK 53+) ném lỗi ngay khi import expo-notifications,
-// nên nạp lười trong try/catch: nhắc giờ chỉ hoạt động ở development build / APK.
+// Expo Go không có native module của expo-notifications: import sẽ ném lỗi, kể cả khi
+// Fast Refresh nạp lại module ngoài try/catch. Vì vậy không nạp nó trong Expo Go;
+// nhắc giờ chỉ hoạt động ở development build / APK.
+const inExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
 let Notifications: NotificationsModule | null = null;
-if (Platform.OS === 'android' || Platform.OS === 'ios') {
+if ((Platform.OS === 'android' || Platform.OS === 'ios') && !inExpoGo) {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     Notifications = require('expo-notifications') as NotificationsModule;
