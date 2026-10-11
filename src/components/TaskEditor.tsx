@@ -8,7 +8,15 @@ import { colors } from '@/theme';
 import { Task } from '@/types';
 import { Button, Chip, Field, Stepper } from './ui';
 
-type Draft = { title: string; subjectId: string | null; date: string; start: string; duration: number; note: string };
+type Draft = {
+  title: string;
+  subjectId: string | null;
+  topicId: string | undefined;
+  date: string;
+  start: string;
+  duration: number;
+  note: string;
+};
 
 /** Thêm mới (task = null) hoặc sửa một buổi học. */
 export function TaskEditor({
@@ -30,18 +38,19 @@ export function TaskEditor({
 }
 
 function EditorForm({ task, defaultDate, onClose }: { task: Task | null; defaultDate: string; onClose: () => void }) {
-  const { subjects, addTask, updateTask, deleteTask } = useStore();
+  const { subjects, topics, addTask, updateTask, deleteTask } = useStore();
   const [d, setD] = useState<Draft>(() =>
     task
       ? {
           title: task.title,
           subjectId: task.subjectId,
+          topicId: task.topicId,
           date: task.date,
           start: task.start,
           duration: task.duration,
           note: task.note ?? '',
         }
-      : { title: '', subjectId: null, date: defaultDate, start: '19:00', duration: 45, note: '' },
+      : { title: '', subjectId: null, topicId: undefined, date: defaultDate, start: '19:00', duration: 45, note: '' },
   );
 
   const save = () => {
@@ -49,6 +58,7 @@ function EditorForm({ task, defaultDate, onClose }: { task: Task | null; default
     const payload = {
       title: d.title.trim(),
       subjectId: d.subjectId,
+      topicId: d.topicId,
       date: d.date,
       start: d.start,
       duration: d.duration,
@@ -92,6 +102,18 @@ function EditorForm({ task, defaultDate, onClose }: { task: Task | null; default
                 <Text style={{ color: colors.muted, fontSize: 12 }}>Thêm môn học trong tab Cài đặt hoặc Lập lịch AI.</Text>
               )}
             </View>
+
+            {topics.length > 0 && (
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' }}>Chủ đề kiến thức</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <Chip label="Không" active={d.topicId === undefined} onPress={() => setD({ ...d, topicId: undefined })} />
+                  {topics.map((t) => (
+                    <Chip key={t.id} label={t.name} active={d.topicId === t.id} onPress={() => setD({ ...d, topicId: t.id })} />
+                  ))}
+                </View>
+              </View>
+            )}
 
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <Stepper

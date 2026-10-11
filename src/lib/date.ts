@@ -19,6 +19,12 @@ export function addDays(iso: string, n: number): string {
   return toISO(d);
 }
 
+/** Thứ Hai đầu tuần chứa ngày `iso`. */
+export function startOfWeek(iso: string): string {
+  const dow = (fromISO(iso).getDay() + 6) % 7; // T2 = 0
+  return addDays(iso, -dow);
+}
+
 export function daysBetween(a: string, b: string): number {
   return Math.round((fromISO(b).getTime() - fromISO(a).getTime()) / 86400000);
 }

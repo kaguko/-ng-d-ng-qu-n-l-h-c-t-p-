@@ -15,7 +15,7 @@ import {
   toMinutes,
   todayISO,
 } from '@/lib/date';
-import { GeminiError, generatePlan, PlanItem } from '@/lib/gemini';
+import { GeminiError, generatePlan, PlanItem, PlanTopic } from '@/lib/gemini';
 import { placeItems } from '@/lib/scheduler';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
@@ -24,7 +24,7 @@ const LEVELS = ['Mới bắt đầu', 'Trung bình', 'Khá', 'Nâng cao'];
 const MAX_DAYS = 21;
 
 export default function Planner() {
-  const { subjects, tasks, settings, apiKey, addSubject, addTasks } = useStore();
+  const { subjects, tasks, settings, apiKey, addSubject, addPlan } = useStore();
   const today = todayISO();
 
   const [goal, setGoal] = useState('');
@@ -42,6 +42,7 @@ export default function Planner() {
   const [error, setError] = useState('');
   const [plan, setPlan] = useState<PlanItem[] | null>(null);
   const [planNote, setPlanNote] = useState('');
+  const [planTopics, setPlanTopics] = useState<PlanTopic[]>([]);
 
   const togglePick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
 
@@ -69,7 +70,7 @@ export default function Planner() {
       const existing = tasks
         .filter((t) => t.date >= start && t.date <= end)
         .map((t) => ({ date: t.date, start: t.start, duration: t.duration }));
-      const items = await generatePlan({
+      const result = await generatePlan({
         apiKey,
         model: settings.model,
         goal: goal.trim(),
@@ -85,7 +86,7 @@ export default function Planner() {
         now: { date: today, time: nowHHmm() },
       });
       // Lưới an toàn: ép lịch của AI thoả khung giờ, không trùng, không quá số giờ/ngày.
-      const { placed, dropped, moved } = placeItems(items, {
+      const { placed, dropped, moved } = placeItems(result.items, {
         startDate: start,
         endDate: end,
         windowStart: winStart,
@@ -94,11 +95,14 @@ export default function Planner() {
         existing,
         earliest: { date: today, minute: toMinutes(nowHHmm()) + 10 },
       });
-      if (!placed.length) throw new GeminiError('Không xếp được buổi nào vào khung giờ bạn chọn. Thử mở rộng ngày hoặc giờ rảnh.');
+      if (!placed.length) throw new GeminiError(
+          `Không còn chỗ trống từ ${formatShort(start)} đến ${formatShort(end)} (khung ${winStart}–${winEnd}, tối đa ${hours} giờ/ngày, đã trừ các buổi đang có). Hãy mở rộng ngày hoặc giờ rảnh.`,
+        );
       const changes: string[] = [];
       if (moved) changes.push(`đã tự chỉnh giờ ${moved} buổi cho khỏi trùng`);
       if (dropped.length) changes.push(`bỏ ${dropped.length} buổi vì không còn chỗ trống`);
       setPlanNote(changes.length ? `Lumo ${changes.join(', ')}.` : '');
+      setPlanTopics(result.topics);
       setPlan(placed);
     } catch (e) {
       setError(e instanceof GeminiError ? e.message : 'Có lỗi xảy ra, thử lại nhé.');
@@ -118,8 +122,8 @@ export default function Planner() {
       if (!created.has(key)) created.set(key, addSubject(name).id);
       return created.get(key)!;
     };
-    addTasks(
-      plan.map((p) => ({
+    addPlan({
+      tasks: plan.map((p) => ({
         title: p.title,
         subjectId: resolve(p.subject),
         date: p.date,
@@ -127,9 +131,12 @@ export default function Planner() {
         duration: p.duration,
         note: p.note || undefined,
         ai: true,
+        topicName: p.topic || undefined,
       })),
-    );
+      topics: planTopics.map((t) => ({ name: t.name, subjectId: resolve(t.subject), requires: t.requires })),
+    });
     setPlan(null);
+    setPlanTopics([]);
     setGoal('');
     router.navigate('/schedule');
   };
@@ -146,6 +153,19 @@ export default function Planner() {
           Lịch gợi ý ✨
         </Title>
         {planNote ? <Text style={{ color: colors.warn, fontSize: 13 }}>{planNote}</Text> : null}
+        {planTopics.length > 0 && (
+          <Card>
+            <Text style={{ color: colors.accent, fontWeight: '800' }}>
+              Bản đồ kiến thức · {planTopics.length} chủ đề · {planTopics.reduce((n, t) => n + t.requires.length, 0)} liên kết
+            </Text>
+            {planTopics.map((t) => (
+              <Text key={t.name} style={{ color: colors.text, fontSize: 13 }}>
+                {t.requires.length ? `${t.requires.join(', ')}  →  ` : '● '}
+                <Text style={{ fontWeight: '700' }}>{t.name}</Text>
+              </Text>
+            ))}
+          </Card>
+        )}
         {Object.entries(byDay).map(([date, items]) => (
           <Card key={date}>
             <Text style={{ color: colors.accent, fontWeight: '800' }}>{formatLong(date)}</Text>
@@ -155,6 +175,7 @@ export default function Planner() {
                 <Text style={{ color: colors.muted, fontSize: 12 }}>
                   {p.start}–{endTime(p.start, p.duration)} · {formatDuration(p.duration)}
                   {p.subject ? ` · ${p.subject}` : ''}
+                  {p.topic ? ` · 🔗 ${p.topic}` : ''}
                 </Text>
                 {p.note ? <Text style={{ color: colors.muted, fontSize: 12 }}>{p.note}</Text> : null}
               </View>

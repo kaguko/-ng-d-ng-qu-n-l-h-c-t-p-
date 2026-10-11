@@ -27,6 +27,7 @@ function Gate() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="coach" options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen name="focus" options={{ animation: 'slide_from_bottom' }} />
     </Stack>
   );
 }

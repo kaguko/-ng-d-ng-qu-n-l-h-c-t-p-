@@ -8,6 +8,7 @@ import { TaskRow } from '@/components/TaskRow';
 import { Button, Card, Empty, ErrorBox, Screen, SectionTitle } from '@/components/ui';
 import { addDays, formatDuration, formatLong, nowHHmm, toMinutes, todayISO, weekdayShort } from '@/lib/date';
 import { GeminiError, rescheduleOverdue } from '@/lib/gemini';
+import { qualityScore } from '@/lib/stats';
 import { placeItems } from '@/lib/scheduler';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
@@ -41,6 +42,10 @@ export default function Today() {
   );
 
   const focusToday = logs.filter((l) => l.date === today).reduce((s, l) => s + l.minutes, 0);
+  const quality = useMemo(
+    () => qualityScore({ tasks, logs, today, dailyGoalMin: settings.dailyGoalMin }),
+    [tasks, logs, today, settings.dailyGoalMin],
+  );
 
   const week = useMemo(
     () =>
@@ -122,6 +127,27 @@ export default function Today() {
           <Text style={{ fontSize: 16 }}>🔥</Text>
           <Text style={{ color: colors.warn, fontWeight: '800', fontSize: 16 }}>{streak}</Text>
         </View>
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Pressable onPress={() => router.push('/focus')} style={{ flex: 1 }}>
+          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 }}>
+            <Ionicons name="timer" size={26} color={colors.accent} />
+            <View>
+              <Text style={{ color: colors.text, fontWeight: '800' }}>Tập trung</Text>
+              <Text style={{ color: colors.muted, fontSize: 11 }}>Bấm giờ ngay</Text>
+            </View>
+          </Card>
+        </Pressable>
+        <Pressable onPress={() => router.navigate('/stats')} style={{ flex: 1 }}>
+          <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 }}>
+            <Ionicons name="stats-chart" size={26} color={colors.primary} />
+            <View>
+              <Text style={{ color: colors.text, fontWeight: '800' }}>{quality.hasData ? `${quality.score} điểm` : 'Thống kê'}</Text>
+              <Text style={{ color: colors.muted, fontSize: 11 }}>{quality.hasData ? quality.label : 'Chất lượng học'}</Text>
+            </View>
+          </Card>
+        </Pressable>
       </View>
 
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>

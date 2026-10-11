@@ -14,6 +14,14 @@ import { Task } from '@/types';
 const PRESETS = [15, 25, 45, 60];
 const KEEP_AWAKE_TAG = 'lumo-focus';
 
+const RATINGS = [
+  { value: 1, emoji: '😵', label: 'Rất tệ' },
+  { value: 2, emoji: '😕', label: 'Phân tâm' },
+  { value: 3, emoji: '😐', label: 'Tạm ổn' },
+  { value: 4, emoji: '🙂', label: 'Tốt' },
+  { value: 5, emoji: '🤩', label: 'Cực tập trung' },
+];
+
 type Phase = 'idle' | 'running' | 'paused';
 
 const mmss = (ms: number) => {
@@ -30,13 +38,15 @@ export default function Focus() {
 }
 
 function FocusSession({ task }: { task?: Task }) {
-  const { subjects, logs, addLog, updateTask, settings } = useStore();
+  const { subjects, logs, addLog, setLogRating, updateTask, settings } = useStore();
   const initial = task ? Math.min(180, Math.max(5, task.duration)) : 25;
   const [minutes, setMinutes] = useState(initial);
   const [subjectId, setSubjectId] = useState<string | null>(task?.subjectId ?? null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [remaining, setRemaining] = useState(initial * 60000);
   const [justDone, setJustDone] = useState<{ minutes: number; completed: boolean } | null>(null);
+  const [lastLog, setLastLog] = useState<string | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
 
   const endAt = useRef(0);
   const totalMs = minutes * 60000;
@@ -53,7 +63,8 @@ function FocusSession({ task }: { task?: Task }) {
         clearInterval(id);
         setRemaining(0);
         setPhase('idle');
-        addLog(minutes, subjectId);
+        setLastLog(addLog(minutes, subjectId, task?.id));
+        setRating(null);
         if (task && !task.done) updateTask(task.id, { done: true });
         setJustDone({ minutes, completed: !!task });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -82,6 +93,7 @@ function FocusSession({ task }: { task?: Task }) {
   const start = () => {
     endAt.current = Date.now() + remaining;
     setJustDone(null);
+    setLastLog(null);
     setPhase('running');
   };
   const pause = () => {
@@ -90,7 +102,8 @@ function FocusSession({ task }: { task?: Task }) {
   };
   const finishEarly = () => {
     const done = elapsedMinutes();
-    if (done >= 1) addLog(done, subjectId);
+    setLastLog(done >= 1 ? addLog(done, subjectId, task?.id) : null);
+    setRating(null);
     setPhase('idle');
     setRemaining(totalMs);
     setJustDone(done >= 1 ? { minutes: done, completed: false } : null);
@@ -101,7 +114,14 @@ function FocusSession({ task }: { task?: Task }) {
 
   return (
     <Screen>
-      <Title sub="Một việc một lúc. Điện thoại cứ để yên.">Tập trung</Title>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Pressable onPress={() => router.back()} hitSlop={12} accessibilityLabel="Quay lại">
+          <Ionicons name="chevron-back" size={28} color={colors.text} />
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Title sub="Một việc một lúc. Điện thoại cứ để yên.">Tập trung</Title>
+        </View>
+      </View>
 
       {task ? (
         <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 12, borderColor: colors.accent }}>
@@ -135,6 +155,38 @@ function FocusSession({ task }: { task?: Task }) {
           </Text>
         ) : null}
       </Card>
+
+      {justDone && lastLog ? (
+        <Card>
+          <Text style={{ color: colors.text, fontWeight: '700' }}>Buổi vừa rồi bạn tập trung thế nào?</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            {RATINGS.map((r) => (
+              <Pressable
+                key={r.value}
+                onPress={() => {
+                  setRating(r.value);
+                  setLogRating(lastLog, r.value);
+                }}
+                style={{
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingVertical: 8,
+                  paddingHorizontal: 6,
+                  borderRadius: 14,
+                  borderWidth: 1.5,
+                  borderColor: rating === r.value ? colors.accent : 'transparent',
+                  backgroundColor: rating === r.value ? colors.surface2 : 'transparent',
+                  minWidth: 56,
+                }}
+              >
+                <Text style={{ fontSize: 26 }}>{r.emoji}</Text>
+                <Text style={{ color: rating === r.value ? colors.text : colors.muted, fontSize: 10 }}>{r.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {rating ? <Text style={{ color: colors.success, fontSize: 12 }}>Đã lưu. Điểm này góp vào biểu đồ chất lượng học.</Text> : null}
+        </Card>
+      ) : null}
 
       <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'center' }}>
         {presets.map((m) => (

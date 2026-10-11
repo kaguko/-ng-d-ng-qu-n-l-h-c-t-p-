@@ -19,7 +19,7 @@ import { colors, gradients, radius } from '@/theme';
 export function Screen({
   children,
   scroll = true,
-  padBottom = 32,
+  padBottom = 130, // chừa chỗ cho thanh tab nổi
 }: {
   children: React.ReactNode;
   scroll?: boolean;

@@ -3,18 +3,25 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { addDays, todayISO } from '@/lib/date';
 import { loadApiKey, saveApiKey } from '@/lib/secure';
 import { subjectEmojis, subjectPalette } from '@/theme';
-import { DEFAULT_SETTINGS, FocusLog, Settings, Subject, Task } from '@/types';
+import { sanitizeTopics } from '@/lib/graph';
+import { DEFAULT_SETTINGS, FocusLog, Settings, Subject, Task, Topic } from '@/types';
 
 const DATA_KEY = 'lumo.data.v1';
 
 type Data = {
   subjects: Subject[];
   tasks: Task[];
+  topics: Topic[];
   logs: FocusLog[];
   settings: Settings;
 };
 
-const EMPTY: Data = { subjects: [], tasks: [], logs: [], settings: DEFAULT_SETTINGS };
+const EMPTY: Data = { subjects: [], tasks: [], topics: [], logs: [], settings: DEFAULT_SETTINGS };
+
+export type PlanInput = {
+  tasks: (Omit<Task, 'id' | 'done' | 'topicId'> & { topicName?: string })[];
+  topics: { name: string; subjectId: string | null; requires: string[] }[];
+};
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -29,7 +36,12 @@ type Store = Data & {
   deleteTask: (id: string) => void;
   addSubject: (name: string) => Subject;
   deleteSubject: (id: string) => void;
-  addLog: (minutes: number, subjectId: string | null) => void;
+  addPlan: (plan: PlanInput) => void;
+  addTopic: (name: string, subjectId: string | null, requires: string[]) => void;
+  updateTopic: (id: string, patch: Partial<Omit<Topic, 'id'>>) => void;
+  deleteTopic: (id: string) => void;
+  addLog: (minutes: number, subjectId: string | null, taskId?: string) => string;
+  setLogRating: (id: string, rating: number) => void;
   setSettings: (patch: Partial<Settings>) => void;
   setApiKey: (key: string) => Promise<void>;
   resetData: () => void;
@@ -52,8 +64,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (raw) {
           const parsed = JSON.parse(raw) as Partial<Data>;
           setData({
-            subjects: parsed.subjects ?? [],
+            // đưa màu môn học cũ về bảng màu đã kiểm chứng (theo thứ tự, không đổi nếu đã hợp lệ)
+            subjects: (parsed.subjects ?? []).map((s, i) =>
+              subjectPalette.includes(s.color) ? s : { ...s, color: subjectPalette[i % subjectPalette.length] },
+            ),
             tasks: parsed.tasks ?? [],
+            topics: parsed.topics ?? [],
             logs: parsed.logs ?? [],
             settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
           });
@@ -119,13 +135,73 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...d,
       subjects: d.subjects.filter((s) => s.id !== id),
       tasks: d.tasks.map((t) => (t.subjectId === id ? { ...t, subjectId: null } : t)),
+      topics: d.topics.map((t) => (t.subjectId === id ? { ...t, subjectId: null } : t)),
       logs: d.logs.map((l) => (l.subjectId === id ? { ...l, subjectId: null } : l)),
     }));
   }, []);
 
-  const addLog = useCallback((minutes: number, subjectId: string | null) => {
-    if (minutes <= 0) return;
-    setData((d) => ({ ...d, logs: [...d.logs, { id: uid(), date: todayISO(), minutes, subjectId }] }));
+  const addPlan = useCallback((plan: PlanInput) => {
+    setData((d) => {
+      const topics = d.topics.map((t) => ({ ...t }));
+      const key = (n: string) => n.trim().toLowerCase();
+      const idOf = new Map(topics.map((t) => [key(t.name), t.id]));
+
+      // tạo chủ đề mới trước (để cạnh có thể trỏ tới nhau theo tên), rồi nối liên kết
+      for (const t of plan.topics) {
+        if (!t.name.trim() || idOf.has(key(t.name))) continue;
+        const id = uid();
+        idOf.set(key(t.name), id);
+        topics.push({ id, name: t.name.trim(), subjectId: t.subjectId, requires: [] });
+      }
+      for (const t of plan.topics) {
+        const topic = topics.find((x) => x.id === idOf.get(key(t.name)));
+        if (!topic) continue;
+        for (const r of t.requires) {
+          const rid = idOf.get(key(r));
+          if (rid && !topic.requires.includes(rid)) topic.requires.push(rid);
+        }
+      }
+
+      const tasks = plan.tasks.map(({ topicName, ...rest }) => ({
+        ...rest,
+        id: uid(),
+        done: false,
+        topicId: topicName ? idOf.get(key(topicName)) : undefined,
+      }));
+      return { ...d, topics: sanitizeTopics(topics), tasks: [...d.tasks, ...tasks] };
+    });
+  }, []);
+
+  const addTopic = useCallback((name: string, subjectId: string | null, requires: string[]) => {
+    const clean = name.trim();
+    if (!clean) return;
+    setData((d) => {
+      if (d.topics.some((t) => t.name.toLowerCase() === clean.toLowerCase())) return d;
+      return { ...d, topics: sanitizeTopics([...d.topics, { id: uid(), name: clean, subjectId, requires }]) };
+    });
+  }, []);
+
+  const updateTopic = useCallback((id: string, patch: Partial<Omit<Topic, 'id'>>) => {
+    setData((d) => ({ ...d, topics: sanitizeTopics(d.topics.map((t) => (t.id === id ? { ...t, ...patch } : t))) }));
+  }, []);
+
+  const deleteTopic = useCallback((id: string) => {
+    setData((d) => ({
+      ...d,
+      topics: d.topics.filter((t) => t.id !== id).map((t) => ({ ...t, requires: t.requires.filter((r) => r !== id) })),
+      tasks: d.tasks.map((t) => (t.topicId === id ? { ...t, topicId: undefined } : t)),
+    }));
+  }, []);
+
+  const addLog = useCallback((minutes: number, subjectId: string | null, taskId?: string) => {
+    const id = uid();
+    if (minutes <= 0) return id;
+    setData((d) => ({ ...d, logs: [...d.logs, { id, date: todayISO(), minutes, subjectId, taskId }] }));
+    return id;
+  }, []);
+
+  const setLogRating = useCallback((id: string, rating: number) => {
+    setData((d) => ({ ...d, logs: d.logs.map((l) => (l.id === id ? { ...l, rating } : l)) }));
   }, []);
 
   const setSettings = useCallback((patch: Partial<Settings>) => {
@@ -168,7 +244,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteTask,
     addSubject,
     deleteSubject,
+    addPlan,
+    addTopic,
+    updateTopic,
+    deleteTopic,
     addLog,
+    setLogRating,
     setSettings,
     setApiKey,
     resetData,

@@ -21,15 +21,21 @@ export const gradients = {
 
 export const radius = { sm: 10, md: 16, lg: 24, pill: 999 };
 
+// Bảng màu phân loại đã kiểm chứng (dataviz validate_palette, giao diện tối, nền #15152E):
+// đạt dải độ sáng, độ bão hoà, tách biệt cho người mù màu và độ tương phản >= 3:1.
+// Thứ tự cố định, không xoay vòng; màu theo môn học, không theo thứ hạng.
 export const subjectPalette = [
-  '#7C5CFF',
-  '#22D3EE',
-  '#FF5CAA',
-  '#34D399',
-  '#FBBF24',
-  '#60A5FA',
-  '#FB923C',
-  '#A78BFA',
+  '#3987E5',
+  '#D95926',
+  '#199E70',
+  '#C98500',
+  '#D55181',
+  '#008300',
+  '#9085E9',
+  '#E66767',
 ];
+
+// Dải đơn sắc cho heatmap: càng sáng càng nhiều (nền tối). Bậc tối nhất vẫn >= 2:1 so với nền.
+export const heatRamp = ['#184F95', '#1C5CAB', '#256ABF', '#3987E5', '#6DA7EC', '#9EC5F4'];
 
 export const subjectEmojis = ['📘', '🧮', '🧪', '🌏', '💻', '🎨', '📝', '🗣️'];

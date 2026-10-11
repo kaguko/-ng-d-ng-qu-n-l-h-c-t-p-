@@ -18,6 +18,16 @@ export type Task = {
   done: boolean;
   note?: string;
   ai?: boolean;
+  /** chủ đề kiến thức mà buổi học này thuộc về */
+  topicId?: string;
+};
+
+/** Một nút kiến thức. `requires` là các chủ đề cần nắm trước (cạnh đi từ chúng tới chủ đề này). */
+export type Topic = {
+  id: string;
+  name: string;
+  subjectId: string | null;
+  requires: string[];
 };
 
 export type FocusLog = {
@@ -25,6 +35,9 @@ export type FocusLog = {
   date: string;
   minutes: number;
   subjectId: string | null;
+  /** tự đánh giá độ tập trung sau buổi học, 1–5 */
+  rating?: number;
+  taskId?: string;
 };
 
 export type Settings = {

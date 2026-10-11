@@ -29,6 +29,7 @@ export function ProgressRing({
           </SvgGradient>
         </Defs>
         <Circle cx={size / 2} cy={size / 2} r={r} stroke={colors.surface2} strokeWidth={stroke} fill="none" />
+        {p > 0 && (
         <Circle
           cx={size / 2}
           cy={size / 2}
@@ -40,6 +41,7 @@ export function ProgressRing({
           strokeDasharray={`${c} ${c}`}
           strokeDashoffset={c * (1 - p)}
         />
+        )}
       </Svg>
       <Text style={{ color: colors.text, fontSize: size / 4.2, fontWeight: '800' }}>{center}</Text>
       {caption ? <Text style={{ color: colors.muted, fontSize: 12 }}>{caption}</Text> : null}

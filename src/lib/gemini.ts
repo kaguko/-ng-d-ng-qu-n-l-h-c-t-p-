@@ -139,11 +139,29 @@ export type PlanItem = {
   title: string;
   subject: string;
   note: string;
+  /** tên chủ đề kiến thức (khớp một phần tử trong PlanResult.topics) */
+  topic: string;
 };
+
+export type PlanTopic = { name: string; subject: string; requires: string[] };
+
+export type PlanResult = { items: PlanItem[]; topics: PlanTopic[] };
 
 const planSchema = {
   type: 'OBJECT',
   properties: {
+    topics: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING' },
+          subject: { type: 'STRING' },
+          requires: { type: 'ARRAY', items: { type: 'STRING' } },
+        },
+        required: ['name', 'subject', 'requires'],
+      },
+    },
     items: {
       type: 'ARRAY',
       items: {
@@ -155,19 +173,21 @@ const planSchema = {
           title: { type: 'STRING' },
           subject: { type: 'STRING' },
           note: { type: 'STRING' },
+          topic: { type: 'STRING' },
         },
-        required: ['date', 'start', 'duration', 'title', 'subject'],
+        required: ['date', 'start', 'duration', 'title', 'subject', 'topic'],
       },
     },
   },
-  required: ['items'],
+  required: ['topics', 'items'],
 };
 
 const SYSTEM_PLANNER = `Bạn là huấn luyện viên học tập giúp học sinh/sinh viên Việt Nam lập lịch học khoa học.
 Nguyên tắc: chia nhỏ mục tiêu thành các buổi 25-90 phút; xen kẽ các môn; ôn tập ngắt quãng (spaced repetition) trước kỳ hạn; dành buổi ôn tổng hợp/làm đề ở cuối; nghỉ giữa các buổi liền kề ít nhất 10 phút; không xếp vào khung giờ đã bận; không vượt quá số giờ học mỗi ngày.
-Tiêu đề từng buổi phải cụ thể, hành động được (ví dụ "Giải 15 bài tích phân từng phần"), viết bằng tiếng Việt. "subject" phải trùng đúng một tên trong danh sách môn người dùng cung cấp.`;
+Tiêu đề từng buổi phải cụ thể, hành động được (ví dụ "Giải 15 bài tích phân từng phần"), viết bằng tiếng Việt. "subject" phải trùng đúng một tên trong danh sách môn người dùng cung cấp.
+Đồng thời dựng bản đồ kiến thức: chia mục tiêu thành 4-12 chủ đề ("topics"), mỗi chủ đề có tên ngắn gọn (tối đa 5 từ) và "requires" là danh sách tên các chủ đề khác cần nắm trước (rỗng nếu là nền tảng; chỉ nêu mối phụ thuộc thật sự, tránh nối thừa, không tạo vòng tròn). Mỗi buổi học có "topic" trùng đúng tên một chủ đề, và các buổi của chủ đề nền tảng phải đứng trước các buổi của chủ đề phụ thuộc vào nó.`;
 
-export async function generatePlan(req: PlanRequest): Promise<PlanItem[]> {
+export async function generatePlan(req: PlanRequest): Promise<PlanResult> {
   const busy = req.existing.length
     ? req.existing.map((e) => `${e.date} ${e.start} (${e.duration} phút)`).join('; ')
     : 'không có';
@@ -182,7 +202,7 @@ Khung giờ đã bận (không xếp trùng): ${busy}
 
 Trả về danh sách buổi học theo schema.`;
 
-  const parsed = await callJSON<{ items?: Partial<PlanItem>[] }>({
+  const parsed = await callJSON<{ items?: Partial<PlanItem>[]; topics?: Partial<PlanTopic>[] }>({
     apiKey: req.apiKey,
     model: req.model,
     system: SYSTEM_PLANNER,
@@ -203,10 +223,88 @@ Trả về danh sách buổi học theo schema.`;
       title: String(r.title).slice(0, 120),
       subject: String(r.subject ?? ''),
       note: String(r.note ?? '').slice(0, 300),
+      topic: String(r.topic ?? '').trim().slice(0, 60),
     });
   }
   if (!items.length) throw new GeminiError('Gemini không tạo được buổi học nào hợp lệ. Hãy thử mô tả mục tiêu rõ hơn.');
-  return items;
+
+  const topics = cleanTopics(parsed.topics ?? []);
+  // buổi học trỏ tới chủ đề không tồn tại thì bỏ liên kết chủ đề, không bỏ buổi học
+  const known = new Set(topics.map((t) => t.name.toLowerCase()));
+  for (const it of items) if (!known.has(it.topic.toLowerCase())) it.topic = '';
+  return { items, topics };
+}
+
+const MAX_TOPICS = 20;
+
+function cleanTopics(raw: Partial<PlanTopic>[]): PlanTopic[] {
+  const seen = new Set<string>();
+  const topics: PlanTopic[] = [];
+  for (const t of raw) {
+    const name = String(t.name ?? '').trim().slice(0, 60);
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    topics.push({
+      name,
+      subject: String(t.subject ?? '').trim(),
+      requires: Array.isArray(t.requires) ? t.requires.map((r) => String(r).trim()).filter(Boolean) : [],
+    });
+    if (topics.length >= MAX_TOPICS) break;
+  }
+  // chỉ giữ liên kết tới chủ đề có thật và không trỏ vào chính nó
+  const names = new Set(topics.map((t) => t.name.toLowerCase()));
+  for (const t of topics) {
+    t.requires = t.requires.filter((r) => names.has(r.toLowerCase()) && r.toLowerCase() !== t.name.toLowerCase());
+  }
+  return topics;
+}
+
+// ---------- Gợi ý liên kết kiến thức ----------
+
+const linksSchema = {
+  type: 'OBJECT',
+  properties: {
+    topics: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING' },
+          requires: { type: 'ARRAY', items: { type: 'STRING' } },
+        },
+        required: ['name', 'requires'],
+      },
+    },
+  },
+  required: ['topics'],
+};
+
+/** Nhờ Gemini đề xuất mối phụ thuộc giữa các chủ đề đã có. Trả về tên chủ đề -> các tên cần học trước. */
+export async function suggestLinks(opts: {
+  apiKey: string;
+  model: string;
+  topics: { name: string; subject?: string }[];
+}): Promise<Map<string, string[]>> {
+  const list = opts.topics.map((t) => `- ${t.name}${t.subject ? ` (${t.subject})` : ''}`).join('\n');
+  const parsed = await callJSON<{ topics?: Partial<PlanTopic>[] }>({
+    apiKey: opts.apiKey,
+    model: opts.model,
+    system:
+      'Bạn là chuyên gia thiết kế chương trình học. Với danh sách chủ đề, hãy chỉ ra chủ đề nào cần nắm trước chủ đề nào. Chỉ nêu mối phụ thuộc thật sự, không tạo vòng tròn, chỉ dùng đúng tên đã cho. Chỉ trả về JSON đúng schema.',
+    messages: [{ role: 'user', text: `Các chủ đề:\n${list}` }],
+    schema: linksSchema,
+    temperature: 0.2,
+  });
+  const clean = cleanTopics((parsed.topics ?? []).map((t) => ({ ...t, subject: '' })));
+  const given = new Map(opts.topics.map((t) => [t.name.toLowerCase(), t.name]));
+  const out = new Map<string, string[]>();
+  for (const t of clean) {
+    const name = given.get(t.name.toLowerCase());
+    if (!name) continue;
+    const reqs = t.requires.map((r) => given.get(r.toLowerCase())).filter((r): r is string => !!r);
+    if (reqs.length) out.set(name, reqs);
+  }
+  return out;
 }
 
 // ---------- Sắp xếp lại việc trễ ----------
