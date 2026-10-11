@@ -123,7 +123,7 @@ export default function Settings() {
           />
         </View>
         {!remindersSupported ? (
-          <Text style={{ color: colors.muted, fontSize: 12 }}>Nhắc giờ học chỉ hoạt động trên Android và iOS.</Text>
+          <Text style={{ color: colors.muted, fontSize: 12 }}>Nhắc giờ học cần bản APK / development build (không chạy trong Expo Go hay web).</Text>
         ) : settings.reminders ? (
           <View style={{ flexDirection: 'row' }}>
             <Stepper
