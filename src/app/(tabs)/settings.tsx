@@ -41,14 +41,19 @@ export default function Settings() {
 
   const test = async () => {
     setTesting(true);
-    setStatus(null);
+    setStatus({ ok: true, msg: 'Đang lưu key…' });
+    const withTimeout = <T,>(p: Promise<T>, ms: number, msg: string) =>
+      Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new GeminiError(msg)), ms))]);
+    let stage = 'lưu key';
     try {
-      await setApiKey(keyDraft);
-      await testConnection(keyDraft.trim(), model);
+      await withTimeout(setApiKey(keyDraft), 8000, 'Không lưu được key vào bộ nhớ an toàn của máy (quá 8 giây).');
+      stage = 'gọi Gemini';
+      setStatus({ ok: true, msg: 'Đang gọi Gemini…' });
+      await withTimeout(testConnection(keyDraft.trim(), model), 20000, 'Không nhận được phản hồi từ Gemini (quá 20 giây).');
       setSettings({ model: model.trim() });
       setStatus({ ok: true, msg: 'Kết nối Gemini thành công ✅' });
     } catch (e) {
-      setStatus({ ok: false, msg: e instanceof GeminiError ? e.message : 'Có lỗi xảy ra.' });
+      setStatus({ ok: false, msg: e instanceof GeminiError ? e.message : `Lỗi khi ${stage}: ${e instanceof Error ? e.message : String(e)}` });
     } finally {
       setTesting(false);
     }
