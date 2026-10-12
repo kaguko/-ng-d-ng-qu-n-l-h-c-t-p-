@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Alert, Linking, Pressable, Share, Switch, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, Share, Switch, Text, View } from 'react-native';
 import { Button, Card, Chip, ErrorBox, Field, Screen, SectionTitle, Stepper, Title } from '@/components/ui';
 import { useToast } from '@/components/Toast';
 import { confirmAction as confirm } from '@/lib/confirm';
@@ -10,6 +10,13 @@ import { GeminiError, testConnection } from '@/lib/gemini';
 import { remindersSupported, requestReminderPermission } from '@/lib/notifications';
 import { useStore } from '@/store';
 import { colors, subjectPalette } from '@/theme';
+
+// Android 12+ chỉ cho báo đúng giờ khi người dùng bật "Báo thức và lời nhắc" cho app
+// (Android 14+ tắt sẵn); nếu không, hệ thống có thể dời thông báo vài phút để tiết kiệm pin.
+const NEEDS_EXACT_ALARM = Platform.OS === 'android' && Number(Platform.Version) >= 31;
+
+const openExactAlarmSettings = () =>
+  Linking.sendIntent('android.settings.REQUEST_SCHEDULE_EXACT_ALARM').catch(() => Linking.openSettings());
 
 const MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-pro'];
 
@@ -161,14 +168,29 @@ export default function Settings() {
         {!remindersSupported ? (
           <Text style={{ color: colors.muted, fontSize: 12 }}>Nhắc giờ học cần bản APK / development build (không chạy trong Expo Go hay web).</Text>
         ) : settings.reminders ? (
-          <View style={{ flexDirection: 'row' }}>
-            <Stepper
-              label="Nhắc trước"
-              value={settings.reminderLead === 0 ? 'Đúng giờ' : `${settings.reminderLead} phút`}
-              onDec={() => setSettings({ reminderLead: Math.max(0, settings.reminderLead - 5) })}
-              onInc={() => setSettings({ reminderLead: Math.min(60, settings.reminderLead + 5) })}
-            />
-          </View>
+          <>
+            <View style={{ flexDirection: 'row' }}>
+              <Stepper
+                label="Nhắc trước"
+                value={settings.reminderLead === 0 ? 'Đúng giờ' : `${settings.reminderLead} phút`}
+                onDec={() => setSettings({ reminderLead: Math.max(0, settings.reminderLead - 5) })}
+                onInc={() => setSettings({ reminderLead: Math.min(60, settings.reminderLead + 5) })}
+              />
+            </View>
+            {NEEDS_EXACT_ALARM && (
+              <Pressable
+                onPress={openExactAlarmSettings}
+                accessibilityRole="button"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}
+              >
+                <Ionicons name="alarm-outline" size={20} color={colors.accent} />
+                <Text style={{ color: colors.muted, fontSize: 12, flex: 1 }}>
+                  Để nhắc và báo hết giờ tập trung đúng phút, hãy bật <Text style={{ color: colors.text, fontWeight: '700' }}>Báo thức và lời nhắc</Text> cho Lumo.
+                </Text>
+                <Text style={{ color: colors.accent, fontWeight: '700', fontSize: 13 }}>Mở</Text>
+              </Pressable>
+            )}
+          </>
         ) : (
           <Text style={{ color: colors.muted, fontSize: 12 }}>Nhận thông báo trước mỗi buổi học chưa hoàn thành.</Text>
         )}

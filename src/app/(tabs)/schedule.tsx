@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TaskEditor } from '@/components/TaskEditor';
-import { TaskRow } from '@/components/TaskRow';
+import { DayAgenda } from '@/components/DayAgenda';
 import { Button, Chip, Empty, Title, useBannerInset } from '@/components/ui';
 import { WeekGrid } from '@/components/WeekGrid';
 import { addDays, formatDuration, formatLong, formatShort, fromISO, startOfWeek, weekdayShort } from '@/lib/date';
@@ -17,7 +16,7 @@ import { Task } from '@/types';
 type Mode = 'day' | 'week';
 
 export default function Schedule() {
-  const { tasks, subjects } = useStore();
+  const { tasks, subjects, subjectOf } = useStore();
   const bannerInset = useBannerInset();
   const { today, now } = useNow();
   const [mode, setMode] = useState<Mode>('week');
@@ -37,6 +36,7 @@ export default function Schedule() {
   const weekEnd = addDays(weekStart, 6);
   const weekTasks = tasks.filter((t) => t.date >= weekStart && t.date <= weekEnd);
   const weekTotal = weekTasks.reduce((s, t) => s + t.duration, 0);
+  const weekDone = weekTasks.filter((t) => t.done).length;
 
   const openEditor = (t: Task | null, at: { date: string; start: string } | null = null) => {
     setEditing(t);
@@ -49,9 +49,13 @@ export default function Schedule() {
       <View style={{ padding: 20, paddingBottom: 12, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <View style={{ flex: 1 }}>
           {mode === 'day' ? (
-            <Title sub={`${dayTasks.length} buổi · ${formatDuration(total)}`}>{formatLong(selected)}</Title>
+            <Title sub={selected === today ? 'Hôm nay' : selected === addDays(today, 1) ? 'Ngày mai' : `${dayTasks.length} buổi · ${formatDuration(total)}`}>
+              {formatLong(selected)}
+            </Title>
           ) : (
-            <Title sub={`${weekTasks.length} buổi · ${formatDuration(weekTotal)}`}>{`${formatShort(weekStart)} – ${formatShort(weekEnd)}`}</Title>
+            <Title sub={`${weekTasks.length} buổi · ${formatDuration(weekTotal)}${weekTasks.length ? ` · ${weekDone} xong` : ''}`}>
+              {`${formatShort(weekStart)} – ${formatShort(weekEnd)}`}
+            </Title>
           )}
         </View>
         <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
@@ -66,16 +70,19 @@ export default function Schedule() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}>
               {days.map((d) => {
                 const isSel = d === selected;
-                const count = tasks.filter((t) => t.date === d).length;
+                const mine = tasks.filter((t) => t.date === d);
+                // tối đa 3 chấm màu theo môn (không trùng); xong hết thì đổi sang dấu ✓
+                const dots = [...new Set(mine.map((t) => subjectOf(t.subjectId)?.color ?? colors.muted))].slice(0, 3);
+                const allDone = mine.length > 0 && mine.every((t) => t.done);
                 return (
                   <Pressable key={d} onPress={() => setSelected(d)}>
                     {isSel ? (
                       <LinearGradient colors={gradients.primary} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={dayStyle}>
-                        <DayInner d={d} count={count} sel />
+                        <DayInner d={d} dots={dots} allDone={allDone} sel />
                       </LinearGradient>
                     ) : (
                       <View style={[dayStyle, { backgroundColor: colors.surface, borderWidth: 1, borderColor: d === today ? colors.accent : colors.border }]}>
-                        <DayInner d={d} count={count} />
+                        <DayInner d={d} dots={dots} allDone={allDone} />
                       </View>
                     )}
                   </Pressable>
@@ -84,21 +91,21 @@ export default function Schedule() {
             </ScrollView>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 150 + bannerInset }} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 14, paddingBottom: 150 + bannerInset }} showsVerticalScrollIndicator={false}>
             {dayTasks.length === 0 ? (
               <View style={{ gap: 12 }}>
                 <Empty icon="calendar-clear-outline" text="Không có buổi học nào trong ngày này." />
                 <Button label="Thêm buổi học" icon="add" variant="ghost" onPress={() => openEditor(null)} />
               </View>
             ) : (
-              dayTasks.map((t) => (
-                <TaskRow
-                  key={t.id}
-                  task={t}
-                  onPress={() => openEditor(t)}
-                  onStart={t.date === today ? () => router.push({ pathname: '/focus', params: { taskId: t.id } }) : undefined}
-                />
-              ))
+              <DayAgenda
+                tasks={dayTasks}
+                isToday={selected === today}
+                isPast={selected < today}
+                now={now}
+                onTask={(t) => openEditor(t)}
+                onSlot={(start) => openEditor(null, { date: selected, start })}
+              />
             )}
           </ScrollView>
         </>
@@ -127,7 +134,9 @@ export default function Schedule() {
                 setMode('day');
               }}
             />
-            <Text style={{ color: colors.muted, fontSize: 11, marginTop: 10 }}>Chạm vào ô trống để thêm buổi học vào giờ đó · chạm vào ngày để xem danh sách.</Text>
+            <Text style={{ color: colors.muted, fontSize: 11, marginTop: 10 }}>
+              Chạm ô trống để thêm buổi vào giờ đó · chạm tên ngày hoặc khối trùng giờ để xem dòng thời gian của ngày.
+            </Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
               {subjects.map((s) => (
                 <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -164,19 +173,20 @@ export default function Schedule() {
 
 const dayStyle = { width: 50, paddingVertical: 10, borderRadius: 16, alignItems: 'center' as const, gap: 4 };
 
-function DayInner({ d, count, sel }: { d: string; count: number; sel?: boolean }) {
+function DayInner({ d, dots, allDone, sel }: { d: string; dots: string[]; allDone: boolean; sel?: boolean }) {
   return (
     <>
       <Text style={{ color: sel ? '#fff' : colors.muted, fontSize: 11, fontWeight: '600' }}>{weekdayShort(d)}</Text>
       <Text style={{ color: sel ? '#fff' : colors.text, fontSize: 18, fontWeight: '800' }}>{fromISO(d).getDate()}</Text>
-      <View
-        style={{
-          width: 5,
-          height: 5,
-          borderRadius: 3,
-          backgroundColor: count ? (sel ? '#fff' : colors.accent) : 'transparent',
-        }}
-      />
+      <View style={{ flexDirection: 'row', gap: 3, height: 6, alignItems: 'center' }}>
+        {allDone ? (
+          <Ionicons name="checkmark" size={10} color={sel ? '#fff' : colors.success} />
+        ) : (
+          dots.map((c) => (
+            <View key={c} style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: sel ? '#fff' : c }} />
+          ))
+        )}
+      </View>
     </>
   );
 }
