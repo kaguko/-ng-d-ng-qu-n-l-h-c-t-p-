@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { Pressable, Text, useWindowDimensions, View } from 'react-native';
-import { addDays, fromISO, nowHHmm, toMinutes, weekdayShort } from '@/lib/date';
+import { addDays, fromISO, fromMinutes, toMinutes, weekdayShort } from '@/lib/date';
 import { colors } from '@/theme';
 import { Subject, Task } from '@/types';
 
@@ -46,15 +46,21 @@ export function WeekGrid({
   tasks,
   subjects,
   today,
+  now,
   onTask,
   onDay,
+  onSlot,
 }: {
   weekStart: string;
   tasks: Task[];
   subjects: Subject[];
   today: string;
+  /** "HH:mm" hiện tại, cho vạch giờ */
+  now: string;
   onTask: (t: Task) => void;
   onDay: (date: string) => void;
+  /** chạm vào ô trống: ngày và giờ bắt đầu (làm tròn 30 phút) */
+  onSlot?: (date: string, start: string) => void;
 }) {
   const { width } = useWindowDimensions();
   const colW = (width - 40 - GUTTER) / 7;
@@ -67,7 +73,7 @@ export function WeekGrid({
   const bodyH = (endH - startH) * HOUR_H;
   const subj = (id: string | null) => subjects.find((s) => s.id === id);
 
-  const nowMin = toMinutes(nowHHmm());
+  const nowMin = toMinutes(now);
   const nowTop = ((nowMin - startH * 60) / 60) * HOUR_H;
   const todayIdx = days.indexOf(today);
 
@@ -105,8 +111,14 @@ export function WeekGrid({
         ))}
 
         {days.map((d, i) => (
-          <View
+          <Pressable
             key={d}
+            accessibilityLabel={`Thêm buổi học ngày ${fromISO(d).getDate()}`}
+            onPress={(e) => {
+              if (!onSlot) return;
+              const min = startH * 60 + (e.nativeEvent.locationY / HOUR_H) * 60;
+              onSlot(d, fromMinutes(Math.min(23 * 60 + 30, Math.max(0, Math.floor(min / 30) * 30))));
+            }}
             style={{
               position: 'absolute',
               left: GUTTER + i * colW,
@@ -156,7 +168,7 @@ export function WeekGrid({
                 </Pressable>
               );
             })}
-          </View>
+          </Pressable>
         ))}
 
         {todayIdx >= 0 && nowTop >= 0 && nowTop <= bodyH && (

@@ -4,6 +4,8 @@ import { fromISO, toMinutes } from '@/lib/date';
 import { Subject, Task } from '@/types';
 
 const CHANNEL = 'study-reminders';
+const TASK_PREFIX = 'task-';
+const FOCUS_ID = 'focus-end';
 // iOS chỉ giữ tối đa 64 thông báo đang chờ.
 const MAX_SCHEDULED = 60;
 
@@ -70,7 +72,11 @@ export async function syncReminders(
   const N = Notifications;
   if (!N) return;
   try {
-    await N.cancelAllScheduledNotificationsAsync();
+    // chỉ huỷ nhắc buổi học, giữ báo hết giờ tập trung
+    const scheduled = await N.getAllScheduledNotificationsAsync();
+    await Promise.all(
+      scheduled.filter((r) => r.identifier !== FOCUS_ID).map((r) => N.cancelScheduledNotificationAsync(r.identifier)),
+    );
     if (!enabled) return;
     if (!(await N.getPermissionsAsync()).granted) return;
     await ensureChannel(N);
@@ -91,6 +97,7 @@ export async function syncReminders(
       const subject = subjects.find((s) => s.id === t.subjectId);
       const when = leadMin > 0 ? `Còn ${leadMin} phút nữa` : 'Đến giờ học rồi';
       await N.scheduleNotificationAsync({
+        identifier: TASK_PREFIX + t.id,
         content: {
           title: `${subject ? subject.emoji + ' ' : '📚 '}${t.title}`,
           body: `${when} · ${t.start}, ${t.duration} phút`,
@@ -105,5 +112,31 @@ export async function syncReminders(
     }
   } catch {
     // lỗi lập lịch nhắc không được làm hỏng app
+  }
+}
+
+/**
+ * Báo khi phiên tập trung hết giờ lúc app đang ở nền; `endAt = null` để huỷ.
+ * Không xin quyền ở đây: chỉ báo nếu người dùng đã cho phép thông báo.
+ */
+export async function syncFocusAlarm(endAt: number | null, title?: string): Promise<void> {
+  const N = Notifications;
+  if (!N) return;
+  try {
+    await N.cancelScheduledNotificationAsync(FOCUS_ID);
+    if (endAt === null || endAt <= Date.now() + 1000) return;
+    if (!(await N.getPermissionsAsync()).granted) return;
+    await ensureChannel(N);
+    await N.scheduleNotificationAsync({
+      identifier: FOCUS_ID,
+      content: {
+        title: '⏰ Hết giờ tập trung',
+        body: title ? `Xong phiên "${title}". Mở Lumo để tự đánh giá nhé.` : 'Nghỉ một chút rồi mở Lumo để tự đánh giá nhé.',
+        sound: true,
+      },
+      trigger: { type: N.SchedulableTriggerInputTypes.DATE, date: endAt, channelId: CHANNEL },
+    });
+  } catch {
+    // lỗi lập lịch không được làm hỏng app
   }
 }

@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import {
   ActivityIndicator,
+  LayoutChangeEvent,
   Pressable,
   ScrollView,
   StyleProp,
@@ -14,22 +15,33 @@ import {
   ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useStore } from '@/store';
 import { colors, gradients, radius } from '@/theme';
+
+/** Chiều cao thêm khi dải tập trung nổi phía trên thanh tab đang hiện. */
+export function useBannerInset(): number {
+  const { focus, focusResult } = useStore();
+  return focus || focusResult ? 64 : 0;
+}
 
 export function Screen({
   children,
   scroll = true,
   padBottom = 130, // chừa chỗ cho thanh tab nổi
+  scrollRef,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
   padBottom?: number;
+  scrollRef?: React.Ref<ScrollView>;
 }) {
+  const inset = useBannerInset();
   return (
     <SafeAreaView style={styles.screen} edges={['top']}>
       {scroll ? (
         <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: padBottom, gap: 16 }}
+          ref={scrollRef}
+          contentContainerStyle={{ padding: 20, paddingBottom: padBottom + inset, gap: 16 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
@@ -42,8 +54,20 @@ export function Screen({
   );
 }
 
-export function Card({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+export function Card({
+  children,
+  style,
+  onLayout,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  onLayout?: (e: LayoutChangeEvent) => void;
+}) {
+  return (
+    <View style={[styles.card, style]} onLayout={onLayout}>
+      {children}
+    </View>
+  );
 }
 
 export function Title({ children, sub }: { children: React.ReactNode; sub?: string }) {

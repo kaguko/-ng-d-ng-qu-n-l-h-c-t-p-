@@ -3,18 +3,25 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { syncReminders } from '@/lib/notifications';
+import { ToastProvider } from '@/components/Toast';
+import { syncFocusAlarm, syncReminders } from '@/lib/notifications';
 import { StoreProvider, useStore } from '@/store';
 import { colors } from '@/theme';
 
 function Gate() {
-  const { ready, tasks, subjects, settings } = useStore();
+  const { ready, tasks, subjects, settings, focus } = useStore();
 
   useEffect(() => {
     if (!ready) return;
     const id = setTimeout(() => syncReminders(tasks, subjects, settings.reminders, settings.reminderLead), 600);
     return () => clearTimeout(id);
   }, [ready, tasks, subjects, settings.reminders, settings.reminderLead]);
+
+  const focusEnd = focus?.endAt ?? null;
+  const focusTitle = focus?.taskId ? tasks.find((t) => t.id === focus.taskId)?.title : undefined;
+  useEffect(() => {
+    if (ready) syncFocusAlarm(focusEnd, focusTitle);
+  }, [ready, focusEnd, focusTitle]);
 
   if (!ready) {
     return (
@@ -36,8 +43,10 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <StoreProvider>
-        <StatusBar style="light" />
-        <Gate />
+        <ToastProvider>
+          <StatusBar style="light" />
+          <Gate />
+        </ToastProvider>
       </StoreProvider>
     </SafeAreaProvider>
   );

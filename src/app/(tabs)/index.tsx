@@ -6,16 +6,17 @@ import { ProgressRing } from '@/components/ProgressRing';
 import { TaskEditor } from '@/components/TaskEditor';
 import { TaskRow } from '@/components/TaskRow';
 import { Button, Card, Empty, ErrorBox, Screen, SectionTitle } from '@/components/ui';
-import { addDays, formatDuration, formatLong, nowHHmm, toMinutes, todayISO, weekdayShort } from '@/lib/date';
+import { addDays, endTime, formatDuration, formatLong, toMinutes, weekdayShort } from '@/lib/date';
 import { GeminiError, rescheduleOverdue } from '@/lib/gemini';
 import { qualityScore } from '@/lib/stats';
 import { placeItems } from '@/lib/scheduler';
+import { useNow } from '@/lib/useNow';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
 import { Task } from '@/types';
 
-function greeting() {
-  const h = new Date().getHours();
+function greeting(now: string) {
+  const h = Number(now.slice(0, 2));
   if (h < 11) return 'Chào buổi sáng';
   if (h < 14) return 'Chào buổi trưa';
   if (h < 18) return 'Chào buổi chiều';
@@ -23,8 +24,8 @@ function greeting() {
 }
 
 export default function Today() {
-  const { tasks, logs, settings, streak, apiKey, updateTasks } = useStore();
-  const today = todayISO();
+  const { tasks, logs, settings, streak, apiKey, updateTasks, subjectOf, focus } = useStore();
+  const { today, now } = useNow();
   const [editing, setEditing] = useState<Task | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -36,10 +37,14 @@ export default function Today() {
   );
   const done = todays.filter((t) => t.done).length;
 
-  const now = nowHHmm();
+  const nowMin = toMinutes(now);
   const overdue = tasks.filter(
-    (t) => !t.done && (t.date < today || (t.date === today && toMinutes(t.start) + t.duration < toMinutes(now))),
+    (t) => !t.done && (t.date < today || (t.date === today && toMinutes(t.start) + t.duration < nowMin)),
   );
+  // buổi đang diễn ra hoặc sắp tới gần nhất trong hôm nay
+  const next = todays.find((t) => !t.done && toMinutes(t.start) + t.duration >= nowMin);
+  const nextSubject = next ? subjectOf(next.subjectId) : undefined;
+  const nextIn = next ? toMinutes(next.start) - nowMin : 0;
 
   const focusToday = logs.filter((l) => l.date === today).reduce((s, l) => s + l.minutes, 0);
   const quality = useMemo(
@@ -111,7 +116,7 @@ export default function Today() {
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View style={{ gap: 2 }}>
           <Text style={{ color: colors.muted, fontSize: 14 }}>{formatLong(today)}</Text>
-          <Text style={{ color: colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 }}>{greeting()} 👋</Text>
+          <Text style={{ color: colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 }}>{greeting(now)} 👋</Text>
         </View>
         <View
           style={{
@@ -175,6 +180,31 @@ export default function Today() {
         </View>
       </Card>
 
+      {next && !focus && (
+        <Card style={{ borderColor: nextSubject?.color ?? colors.accent, gap: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: nextIn <= 0 ? colors.success : colors.accent }} />
+            <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+              {nextIn <= 0 ? 'Đang diễn ra' : nextIn < 60 ? `Bắt đầu sau ${nextIn} phút` : `Tiếp theo lúc ${next.start}`}
+            </Text>
+          </View>
+          <View style={{ gap: 2 }}>
+            <Text style={{ color: colors.text, fontSize: 18, fontWeight: '800' }} numberOfLines={2}>
+              {next.title}
+            </Text>
+            <Text style={{ color: colors.muted, fontSize: 13 }}>
+              {next.start}–{endTime(next.start, next.duration)} · {formatDuration(next.duration)}
+              {nextSubject ? ` · ${nextSubject.emoji} ${nextSubject.name}` : ''}
+            </Text>
+          </View>
+          <Button
+            label={nextIn <= 10 ? 'Bắt đầu tập trung' : 'Học sớm ngay bây giờ'}
+            icon="play"
+            onPress={() => router.push({ pathname: '/focus', params: { taskId: next.id } })}
+          />
+        </Card>
+      )}
+
       {(overdue.length > 0 || error || notice) && (
         <Card style={{ borderColor: overdue.length ? colors.warn : colors.border }}>
           {overdue.length > 0 && (
@@ -217,7 +247,7 @@ export default function Today() {
               key={t.id}
               task={t}
               onPress={() => setEditing(t)}
-              onStart={() => router.navigate({ pathname: '/focus', params: { taskId: t.id } })}
+              onStart={() => router.push({ pathname: '/focus', params: { taskId: t.id } })}
             />
           ))}
         </View>

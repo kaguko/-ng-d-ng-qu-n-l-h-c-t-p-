@@ -1,13 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { TaskEditor } from '@/components/TaskEditor';
 import { TaskRow } from '@/components/TaskRow';
-import { Chip, Empty, Title } from '@/components/ui';
+import { Button, Chip, Empty, Title, useBannerInset } from '@/components/ui';
 import { WeekGrid } from '@/components/WeekGrid';
-import { addDays, formatDuration, formatLong, formatShort, fromISO, startOfWeek, todayISO, weekdayShort } from '@/lib/date';
+import { addDays, formatDuration, formatLong, formatShort, fromISO, startOfWeek, weekdayShort } from '@/lib/date';
+import { useNow } from '@/lib/useNow';
 import { useStore } from '@/store';
 import { colors, gradients } from '@/theme';
 import { Task } from '@/types';
@@ -16,11 +18,13 @@ type Mode = 'day' | 'week';
 
 export default function Schedule() {
   const { tasks, subjects } = useStore();
-  const today = todayISO();
+  const bannerInset = useBannerInset();
+  const { today, now } = useNow();
   const [mode, setMode] = useState<Mode>('week');
   const [selected, setSelected] = useState(today);
   const [editing, setEditing] = useState<Task | null>(null);
   const [open, setOpen] = useState(false);
+  const [slot, setSlot] = useState<{ date: string; start: string } | null>(null);
 
   const days = useMemo(() => Array.from({ length: 28 }, (_, i) => addDays(today, i - 3)), [today]);
   const dayTasks = useMemo(
@@ -34,8 +38,9 @@ export default function Schedule() {
   const weekTasks = tasks.filter((t) => t.date >= weekStart && t.date <= weekEnd);
   const weekTotal = weekTasks.reduce((s, t) => s + t.duration, 0);
 
-  const openEditor = (t: Task | null) => {
+  const openEditor = (t: Task | null, at: { date: string; start: string } | null = null) => {
     setEditing(t);
+    setSlot(at);
     setOpen(true);
   };
 
@@ -79,11 +84,21 @@ export default function Schedule() {
             </ScrollView>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 150 }} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 150 + bannerInset }} showsVerticalScrollIndicator={false}>
             {dayTasks.length === 0 ? (
-              <Empty icon="calendar-clear-outline" text="Không có buổi học nào trong ngày này." />
+              <View style={{ gap: 12 }}>
+                <Empty icon="calendar-clear-outline" text="Không có buổi học nào trong ngày này." />
+                <Button label="Thêm buổi học" icon="add" variant="ghost" onPress={() => openEditor(null)} />
+              </View>
             ) : (
-              dayTasks.map((t) => <TaskRow key={t.id} task={t} onPress={() => openEditor(t)} />)
+              dayTasks.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  onPress={() => openEditor(t)}
+                  onStart={t.date === today ? () => router.push({ pathname: '/focus', params: { taskId: t.id } }) : undefined}
+                />
+              ))
             )}
           </ScrollView>
         </>
@@ -98,19 +113,22 @@ export default function Schedule() {
               <Ionicons name="chevron-forward-circle-outline" size={28} color={colors.muted} />
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 150 }} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 150 + bannerInset }} showsVerticalScrollIndicator={false}>
             <WeekGrid
               weekStart={weekStart}
               tasks={tasks}
               subjects={subjects}
               today={today}
-              onTask={openEditor}
+              now={now}
+              onTask={(t) => openEditor(t)}
+              onSlot={(date, start) => openEditor(null, { date, start })}
               onDay={(d) => {
                 setSelected(d);
                 setMode('day');
               }}
             />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
+            <Text style={{ color: colors.muted, fontSize: 11, marginTop: 10 }}>Chạm vào ô trống để thêm buổi học vào giờ đó · chạm vào ngày để xem danh sách.</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
               {subjects.map((s) => (
                 <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: s.color }} />
@@ -122,7 +140,7 @@ export default function Schedule() {
         </>
       )}
 
-      <Pressable onPress={() => openEditor(null)} style={{ position: 'absolute', right: 20, bottom: 100 }} accessibilityLabel="Thêm buổi học">
+      <Pressable onPress={() => openEditor(null)} style={{ position: 'absolute', right: 20, bottom: 100 + bannerInset }} accessibilityLabel="Thêm buổi học">
         <LinearGradient
           colors={gradients.primary}
           start={{ x: 0, y: 0 }}
@@ -133,7 +151,13 @@ export default function Schedule() {
         </LinearGradient>
       </Pressable>
 
-      <TaskEditor visible={open} task={editing} defaultDate={selected} onClose={() => setOpen(false)} />
+      <TaskEditor
+        visible={open}
+        task={editing}
+        defaultDate={slot?.date ?? selected}
+        defaultStart={slot?.start}
+        onClose={() => setOpen(false)}
+      />
     </SafeAreaView>
   );
 }

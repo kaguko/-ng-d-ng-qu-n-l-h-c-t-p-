@@ -4,6 +4,7 @@ import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '@/theme';
+import { FocusBanner } from './FocusBanner';
 
 /** Thanh tab nổi, bo tròn; tab đang chọn có nền dạng viên thuốc. */
 export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
@@ -14,6 +15,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
       pointerEvents="box-none"
       style={{ position: 'absolute', left: 14, right: 14, bottom: Math.max(insets.bottom, 8) + 6 }}
     >
+      <FocusBanner />
       <View
         style={{
           flexDirection: 'row',

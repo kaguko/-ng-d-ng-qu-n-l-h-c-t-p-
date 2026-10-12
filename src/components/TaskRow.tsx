@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { endTime, formatDuration } from '@/lib/date';
@@ -7,9 +8,21 @@ import { useStore } from '@/store';
 import { colors, radius } from '@/theme';
 import { Task } from '@/types';
 
-export function TaskRow({ task, onPress, onStart }: { task: Task; onPress?: () => void; onStart?: () => void }) {
-  const { toggleTask, subjectOf } = useStore();
+export function TaskRow({
+  task,
+  onPress,
+  onStart,
+  showTopic = true,
+}: {
+  task: Task;
+  onPress?: () => void;
+  onStart?: () => void;
+  /** hiện chủ đề kiến thức, chạm để mở trên bản đồ */
+  showTopic?: boolean;
+}) {
+  const { toggleTask, subjectOf, topics } = useStore();
   const subject = subjectOf(task.subjectId);
+  const topic = showTopic && task.topicId ? topics.find((t) => t.id === task.topicId) : undefined;
   const accent = subject?.color ?? colors.muted;
 
   return (
@@ -45,6 +58,30 @@ export function TaskRow({ task, onPress, onStart }: { task: Task; onPress?: () =
           {subject ? `  ${subject.emoji} ${subject.name}` : ''}
           {task.ai ? '  ✨' : ''}
         </Text>
+        {topic ? (
+          <Pressable
+            hitSlop={6}
+            onPress={() => router.navigate({ pathname: '/map', params: { topic: topic.id } })}
+            accessibilityLabel={`Xem chủ đề ${topic.name} trên bản đồ`}
+            style={{
+              alignSelf: 'flex-start',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 4,
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 999,
+              backgroundColor: colors.surface2,
+              borderWidth: 1,
+              borderColor: colors.border,
+            }}
+          >
+            <Ionicons name="git-network-outline" size={11} color={colors.accent} />
+            <Text style={{ color: colors.accent, fontSize: 11, fontWeight: '600' }} numberOfLines={1}>
+              {topic.name}
+            </Text>
+          </Pressable>
+        ) : null}
         {task.note ? (
           <Text style={{ color: colors.muted, fontSize: 12 }} numberOfLines={2}>
             {task.note}
@@ -58,6 +95,9 @@ export function TaskRow({ task, onPress, onStart }: { task: Task; onPress?: () =
       ) : null}
       <Pressable
         hitSlop={10}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: task.done }}
+        accessibilityLabel={task.done ? 'Bỏ đánh dấu hoàn thành' : 'Đánh dấu hoàn thành'}
         onPress={() => {
           if (!task.done) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
           toggleTask(task.id);

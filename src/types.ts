@@ -40,6 +40,30 @@ export type FocusLog = {
   taskId?: string;
 };
 
+/**
+ * Phiên tập trung đang chạy hoặc tạm dừng. Lưu cùng dữ liệu nên vẫn còn khi rời màn hình
+ * hay tắt app; đang chạy khi `endAt` khác null, tạm dừng thì thời gian còn lại nằm ở `remainingMs`.
+ */
+export type FocusSession = {
+  /** độ dài dự định (phút) */
+  minutes: number;
+  endAt: number | null;
+  remainingMs: number;
+  startedAt: number;
+  subjectId: string | null;
+  taskId?: string;
+};
+
+/** Kết quả phiên vừa kết thúc, dùng để hỏi tự đánh giá. Không lưu xuống đĩa. */
+export type FocusResult = {
+  logId: string | null;
+  minutes: number;
+  /** buổi học được liên kết đã được đánh dấu hoàn thành */
+  completedTask: boolean;
+  taskId?: string;
+  taskTitle?: string;
+};
+
 export type Settings = {
   model: string;
   dailyGoalMin: number;

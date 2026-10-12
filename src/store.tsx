@@ -1,22 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { addDays, todayISO } from '@/lib/date';
+import * as Haptics from 'expo-haptics';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import { Data, EMPTY_DATA, sanitizeData } from '@/lib/data';
+import { addDays, toISO, todayISO } from '@/lib/date';
+import { elapsedMinutes, isFinished, remainingMs } from '@/lib/focus';
 import { loadApiKey, saveApiKey } from '@/lib/secure';
 import { subjectEmojis, subjectPalette } from '@/theme';
 import { sanitizeTopics } from '@/lib/graph';
-import { DEFAULT_SETTINGS, FocusLog, Settings, Subject, Task, Topic } from '@/types';
+import { FocusResult, Settings, Subject, Task, Topic } from '@/types';
 
 const DATA_KEY = 'lumo.data.v1';
 
-type Data = {
-  subjects: Subject[];
-  tasks: Task[];
-  topics: Topic[];
-  logs: FocusLog[];
-  settings: Settings;
-};
-
-const EMPTY: Data = { subjects: [], tasks: [], topics: [], logs: [], settings: DEFAULT_SETTINGS };
 
 export type PlanInput = {
   tasks: (Omit<Task, 'id' | 'done' | 'topicId'> & { topicName?: string })[];
@@ -33,18 +28,29 @@ type Store = Data & {
   updateTask: (id: string, patch: Partial<Task>) => void;
   updateTasks: (patches: { id: string; patch: Partial<Task> }[]) => void;
   toggleTask: (id: string) => void;
-  deleteTask: (id: string) => void;
+  /** xoá và trả về buổi học đã xoá để có thể hoàn tác */
+  deleteTask: (id: string) => Task | undefined;
+  restoreTask: (task: Task) => void;
   addSubject: (name: string) => Subject;
   deleteSubject: (id: string) => void;
   addPlan: (plan: PlanInput) => void;
   addTopic: (name: string, subjectId: string | null, requires: string[]) => void;
   updateTopic: (id: string, patch: Partial<Omit<Topic, 'id'>>) => void;
   deleteTopic: (id: string) => void;
-  addLog: (minutes: number, subjectId: string | null, taskId?: string) => string;
+  startFocus: (opts: { minutes: number; subjectId: string | null; taskId?: string }) => void;
+  pauseFocus: () => void;
+  resumeFocus: () => void;
+  /** kết thúc sớm và lưu số phút đã tập trung */
+  stopFocus: () => void;
+  /** huỷ phiên mà không ghi nhật ký */
+  discardFocus: () => void;
+  focusResult: FocusResult | null;
+  clearFocusResult: () => void;
   setLogRating: (id: string, rating: number) => void;
   setSettings: (patch: Partial<Settings>) => void;
   setApiKey: (key: string) => Promise<void>;
   resetData: () => void;
+  replaceData: (data: Data) => void;
   subjectOf: (id: string | null) => Subject | undefined;
   streak: number;
 };
@@ -52,7 +58,12 @@ type Store = Data & {
 const Ctx = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [data, setData] = useState<Data>(EMPTY);
+  const [data, setData] = useState<Data>(EMPTY_DATA);
+  const [focusResult, setFocusResult] = useState<FocusResult | null>(null);
+  const dataRef = useRef(data);
+  useLayoutEffect(() => {
+    dataRef.current = data;
+  }, [data]);
   const [apiKey, setKey] = useState('');
   const [ready, setReady] = useState(false);
   const loaded = useRef(false);
@@ -61,19 +72,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(DATA_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Partial<Data>;
-          setData({
-            // đưa màu môn học cũ về bảng màu đã kiểm chứng (theo thứ tự, không đổi nếu đã hợp lệ)
-            subjects: (parsed.subjects ?? []).map((s, i) =>
-              subjectPalette.includes(s.color) ? s : { ...s, color: subjectPalette[i % subjectPalette.length] },
-            ),
-            tasks: parsed.tasks ?? [],
-            topics: parsed.topics ?? [],
-            logs: parsed.logs ?? [],
-            settings: { ...DEFAULT_SETTINGS, ...parsed.settings },
-          });
-        }
+        if (raw) setData(sanitizeData(JSON.parse(raw), subjectPalette));
       } catch {
         // dữ liệu hỏng -> bắt đầu mới
       }
@@ -110,7 +109,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteTask = useCallback((id: string) => {
-    setData((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== id) }));
+    const removed = dataRef.current.tasks.find((t) => t.id === id);
+    setData((d) => ({
+      ...d,
+      tasks: d.tasks.filter((t) => t.id !== id),
+      focus: d.focus?.taskId === id ? { ...d.focus, taskId: undefined } : d.focus,
+    }));
+    return removed;
+  }, []);
+
+  const restoreTask = useCallback((task: Task) => {
+    setData((d) => (d.tasks.some((t) => t.id === task.id) ? d : { ...d, tasks: [...d.tasks, task] }));
   }, []);
 
   const addSubject = useCallback(
@@ -193,12 +202,69 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
-  const addLog = useCallback((minutes: number, subjectId: string | null, taskId?: string) => {
-    const id = uid();
-    if (minutes <= 0) return id;
-    setData((d) => ({ ...d, logs: [...d.logs, { id, date: todayISO(), minutes, subjectId, taskId }] }));
-    return id;
+  const startFocus = useCallback<Store['startFocus']>(({ minutes, subjectId, taskId }) => {
+    const now = Date.now();
+    const ms = minutes * 60000;
+    setFocusResult(null);
+    setData((d) => ({ ...d, focus: { minutes, subjectId, taskId, startedAt: now, endAt: now + ms, remainingMs: ms } }));
   }, []);
+
+  const pauseFocus = useCallback(() => {
+    setData((d) =>
+      d.focus && d.focus.endAt !== null
+        ? { ...d, focus: { ...d.focus, remainingMs: remainingMs(d.focus, Date.now()), endAt: null } }
+        : d,
+    );
+  }, []);
+
+  const resumeFocus = useCallback(() => {
+    setData((d) => (d.focus && d.focus.endAt === null ? { ...d, focus: { ...d.focus, endAt: Date.now() + d.focus.remainingMs } } : d));
+  }, []);
+
+  // Phiên đang kết thúc (theo startedAt), chặn ghi nhật ký hai lần khi nhịp kiểm tra chạy trước lần render kế tiếp.
+  const ending = useRef<number | null>(null);
+
+  /** Đóng phiên: ghi nhật ký; nếu chạy đủ giờ thì đánh dấu buổi học liên kết là hoàn thành. */
+  const endFocus = useCallback((natural: boolean) => {
+    const f = dataRef.current.focus;
+    if (!f || ending.current === f.startedAt) return;
+    ending.current = f.startedAt;
+    const minutes = natural ? f.minutes : elapsedMinutes(f, Date.now());
+    const task = f.taskId ? dataRef.current.tasks.find((t) => t.id === f.taskId) : undefined;
+    const completeTask = natural && !!task && !task.done;
+    const logId = minutes >= 1 ? uid() : null;
+    // phiên kết thúc lúc app đang tắt vẫn được ghi vào đúng ngày kết thúc
+    const date = natural && f.endAt !== null ? toISO(new Date(f.endAt)) : todayISO();
+    setData((d) => ({
+      ...d,
+      focus: null,
+      logs: logId ? [...d.logs, { id: logId, date, minutes, subjectId: f.subjectId, taskId: task?.id }] : d.logs,
+      tasks: completeTask ? d.tasks.map((t) => (t.id === task!.id ? { ...t, done: true } : t)) : d.tasks,
+    }));
+    setFocusResult(logId ? { logId, minutes, completedTask: completeTask, taskId: task?.id, taskTitle: task?.title } : null);
+    if (natural) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }, []);
+
+  const stopFocus = useCallback(() => endFocus(false), [endFocus]);
+  const discardFocus = useCallback(() => setData((d) => ({ ...d, focus: null })), []);
+  const clearFocusResult = useCallback(() => setFocusResult(null), []);
+
+  // Tự kết thúc phiên khi hết giờ, kể cả khi đang ở màn hình khác hoặc vừa mở lại app.
+  const running = ready && data.focus !== null && data.focus.endAt !== null;
+  useEffect(() => {
+    if (!running) return;
+    const check = () => {
+      const f = dataRef.current.focus;
+      if (f && isFinished(f, Date.now())) endFocus(true);
+    };
+    check();
+    const id = setInterval(check, 1000);
+    const sub = AppState.addEventListener('change', (st) => st === 'active' && check());
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
+  }, [running, endFocus]);
 
   const setLogRating = useCallback((id: string, rating: number) => {
     setData((d) => ({ ...d, logs: d.logs.map((l) => (l.id === id ? { ...l, rating } : l)) }));
@@ -213,7 +279,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setKey(key.trim());
   }, []);
 
-  const resetData = useCallback(() => setData(EMPTY), []);
+  const resetData = useCallback(() => {
+    setFocusResult(null);
+    setData(EMPTY_DATA);
+  }, []);
+
+  const replaceData = useCallback((next: Data) => {
+    setFocusResult(null);
+    setData({ ...next, focus: null });
+  }, []);
 
   const subjectOf = useCallback((id: string | null) => data.subjects.find((s) => s.id === id), [data.subjects]);
 
@@ -242,17 +316,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateTasks,
     toggleTask,
     deleteTask,
+    restoreTask,
     addSubject,
     deleteSubject,
     addPlan,
     addTopic,
     updateTopic,
     deleteTopic,
-    addLog,
+    startFocus,
+    pauseFocus,
+    resumeFocus,
+    stopFocus,
+    discardFocus,
+    focusResult,
+    clearFocusResult,
     setLogRating,
     setSettings,
     setApiKey,
     resetData,
+    replaceData,
     subjectOf,
     streak,
   };

@@ -1,17 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { Alert, Linking, Platform, Pressable, Switch, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, Share, Switch, Text, View } from 'react-native';
 import { Button, Card, Chip, ErrorBox, Field, Screen, SectionTitle, Stepper, Title } from '@/components/ui';
+import { useToast } from '@/components/Toast';
+import { confirmAction as confirm } from '@/lib/confirm';
+import { exportBackup, parseBackup } from '@/lib/data';
 import { formatDuration } from '@/lib/date';
 import { GeminiError, testConnection } from '@/lib/gemini';
 import { remindersSupported, requestReminderPermission } from '@/lib/notifications';
 import { useStore } from '@/store';
-import { colors } from '@/theme';
+import { colors, subjectPalette } from '@/theme';
 
 const MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.5-pro'];
 
 export default function Settings() {
-  const { apiKey, setApiKey, settings, setSettings, subjects, deleteSubject, resetData } = useStore();
+  const store = useStore();
+  const { apiKey, setApiKey, settings, setSettings, subjects, tasks, logs, addSubject, deleteSubject, resetData, replaceData } = store;
+  const toast = useToast();
+  const [newSubject, setNewSubject] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState('');
   const [keyDraft, setKeyDraft] = useState(apiKey);
   const [show, setShow] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -48,15 +57,42 @@ export default function Settings() {
     ]);
   };
 
-  const confirm = (title: string, message: string, onOk: () => void) => {
-    if (Platform.OS === 'web') {
-      if (window.confirm(`${title}\n${message}`)) onOk();
+  const submitSubject = () => {
+    const name = newSubject.trim();
+    if (!name) return;
+    const exists = subjects.some((s) => s.name.toLowerCase() === name.toLowerCase());
+    addSubject(name);
+    setNewSubject('');
+    toast(exists ? `"${name}" đã có sẵn` : `Đã thêm môn "${name}"`, { icon: exists ? 'information-circle' : 'checkmark-circle' });
+  };
+
+  const backup = async () => {
+    try {
+      await Share.share({ title: 'Sao lưu Lumo', message: exportBackup(store) });
+    } catch {
+      toast('Không mở được trình chia sẻ.', { icon: 'alert-circle' });
+    }
+  };
+
+  const restore = () => {
+    const res = parseBackup(importText, subjectPalette);
+    if (!res.ok) {
+      setImportError(res.error);
       return;
     }
-    Alert.alert(title, message, [
-      { text: 'Huỷ', style: 'cancel' },
-      { text: 'Đồng ý', style: 'destructive', onPress: onOk },
-    ]);
+    setImportError('');
+    const { data } = res;
+    confirm(
+      'Khôi phục dữ liệu',
+      `Thay toàn bộ dữ liệu hiện tại bằng bản sao lưu (${data.tasks.length} buổi học, ${data.subjects.length} môn, ${data.logs.length} phiên tập trung)?`,
+      () => {
+        replaceData(data);
+        setImporting(false);
+        setImportText('');
+        toast('Đã khôi phục dữ liệu');
+      },
+      'Khôi phục',
+    );
   };
 
   return (
@@ -152,8 +188,14 @@ export default function Settings() {
 
       <Card>
         <SectionTitle>Môn học</SectionTitle>
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <Field value={newSubject} onChangeText={setNewSubject} placeholder="Tên môn mới…" onSubmitEditing={submitSubject} returnKeyType="done" />
+          </View>
+          <Button label="Thêm" icon="add" variant="ghost" onPress={submitSubject} disabled={!newSubject.trim()} />
+        </View>
         {subjects.length === 0 ? (
-          <Text style={{ color: colors.muted }}>Chưa có môn nào. Thêm trong tab AI khi lập lịch.</Text>
+          <Text style={{ color: colors.muted }}>Chưa có môn nào. AI cũng tự tạo môn khi lập lịch.</Text>
         ) : (
           subjects.map((s) => (
             <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -169,6 +211,41 @@ export default function Settings() {
               </Pressable>
             </View>
           ))
+        )}
+      </Card>
+
+      <Card>
+        <SectionTitle>Sao lưu & khôi phục</SectionTitle>
+        <Text style={{ color: colors.muted, fontSize: 12 }}>
+          Dữ liệu chỉ nằm trên máy này ({tasks.length} buổi học, {logs.length} phiên tập trung). Hãy sao lưu trước khi đổi máy hoặc
+          xoá app. Bản sao lưu không chứa API key.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Button label="Sao lưu" icon="share-outline" variant="ghost" onPress={backup} style={{ flex: 1 }} />
+          <Button
+            label={importing ? 'Đóng' : 'Khôi phục'}
+            icon={importing ? 'close' : 'download-outline'}
+            variant="ghost"
+            onPress={() => {
+              setImporting(!importing);
+              setImportError('');
+            }}
+            style={{ flex: 1 }}
+          />
+        </View>
+        {importing && (
+          <>
+            <Field
+              value={importText}
+              onChangeText={setImportText}
+              multiline
+              placeholder="Dán nội dung bản sao lưu vào đây…"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {importError ? <ErrorBox message={importError} /> : null}
+            <Button label="Khôi phục từ nội dung đã dán" icon="checkmark" onPress={restore} disabled={!importText.trim()} />
+          </>
         )}
       </Card>
 

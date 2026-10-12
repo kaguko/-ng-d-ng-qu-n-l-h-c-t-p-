@@ -1,16 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { G, Path, Polygon, Rect, Text as SvgText } from 'react-native-svg';
 import { Meter } from '@/components/charts';
+import { TaskEditor } from '@/components/TaskEditor';
 import { TaskRow } from '@/components/TaskRow';
 import { Button, Card, Chip, Empty, ErrorBox, Field, Screen, SectionTitle, Title } from '@/components/ui';
-import { formatDuration } from '@/lib/date';
+import { confirmAction } from '@/lib/confirm';
+import { formatDuration, todayISO } from '@/lib/date';
 import { GeminiError, suggestLinks } from '@/lib/gemini';
 import { isUnlocked, layoutGraph, NODE_H, NODE_W, topicProgress, TopicStatus } from '@/lib/graph';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
+import { Task } from '@/types';
 
 const EDGE = '#4B4F8A';
 const EDGE_OUT = '#9085E9';
@@ -44,7 +47,9 @@ export default function KnowledgeMap() {
   const { topics, tasks, subjects, subjectOf, apiKey, settings, addTopic, updateTopic, deleteTopic } = useStore();
   const { width } = useWindowDimensions();
 
+  const { topic: topicParam } = useLocalSearchParams<{ topic?: string }>();
   const [selected, setSelected] = useState<string | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
@@ -52,6 +57,33 @@ export default function KnowledgeMap() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  // Mở từ một buổi học (chạm vào nhãn chủ đề) thì chọn sẵn chủ đề đó. Điều chỉnh state ngay khi render
+  // theo tham số mới (không qua effect), rồi xoá tham số để lần sau chạm cùng chủ đề vẫn có tác dụng.
+  const [seenParam, setSeenParam] = useState<string | undefined>(undefined);
+  if (topicParam !== seenParam) {
+    setSeenParam(topicParam);
+    if (topicParam) {
+      setSelected(topicParam);
+      setEditing(false);
+    }
+  }
+  // cuộn xuống thẻ chi tiết (nằm dưới đồ thị) để thấy ngay chủ đề vừa mở
+  const scroller = useRef<ScrollView>(null);
+  const detailY = useRef(0);
+  const pendingScroll = useRef(false);
+  useEffect(() => {
+    if (!topicParam) return;
+    pendingScroll.current = true;
+    router.setParams({ topic: '' });
+    // thẻ đã hiện sẵn ở đúng chỗ thì không có onLayout mới: tự cuộn sau một nhịp
+    // (không huỷ trong cleanup: tham số bị xoá ngay sau đó sẽ chạy lại effect này)
+    setTimeout(() => {
+      if (!pendingScroll.current || !detailY.current) return;
+      pendingScroll.current = false;
+      scroller.current?.scrollTo({ y: Math.max(0, detailY.current - 16), animated: true });
+    }, 400);
+  }, [topicParam]);
 
   const layout = useMemo(() => layoutGraph(topics, width - 40), [topics, width]);
   const progress = useMemo(() => new Map(topics.map((t) => [t.id, topicProgress(t.id, tasks)])), [topics, tasks]);
@@ -147,7 +179,7 @@ export default function KnowledgeMap() {
   const unlocks = sel ? topics.filter((t) => t.requires.includes(sel.id)) : [];
 
   return (
-    <Screen>
+    <Screen scrollRef={scroller}>
       <Title sub="Kiến thức nào cần nắm trước kiến thức nào. Chạm vào một nút để xem chi tiết.">Bản đồ kiến thức</Title>
 
       <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -273,7 +305,15 @@ export default function KnowledgeMap() {
       )}
 
       {sel && selProgress && (
-        <Card>
+        <Card
+          onLayout={(e) => {
+            detailY.current = e.nativeEvent.layout.y;
+            if (pendingScroll.current) {
+              pendingScroll.current = false;
+              scroller.current?.scrollTo({ y: Math.max(0, detailY.current - 16), animated: true });
+            }
+          }}
+        >
           <View style={{ gap: 2 }}>
             <Text style={{ color: colors.muted, fontSize: 12 }}>{selSubject ? `${selSubject.emoji} ${selSubject.name}` : 'Chưa gắn môn'}</Text>
             <Text style={{ color: colors.text, fontSize: 20, fontWeight: '800' }}>{sel.name}</Text>
@@ -346,7 +386,7 @@ export default function KnowledgeMap() {
               <SectionTitle>Các buổi học</SectionTitle>
               <View style={{ gap: 8 }}>
                 {selTasks.slice(0, 6).map((t) => (
-                  <TaskRow key={t.id} task={t} />
+                  <TaskRow key={t.id} task={t} showTopic={false} onPress={() => setEditingTask(t)} />
                 ))}
                 {selTasks.length > 6 ? <Text style={{ color: colors.muted, fontSize: 12 }}>… và {selTasks.length - 6} buổi nữa</Text> : null}
               </View>
@@ -360,16 +400,25 @@ export default function KnowledgeMap() {
               label="Xoá"
               icon="trash-outline"
               variant="danger"
-              onPress={() => {
-                deleteTopic(sel.id);
-                setSelected(null);
-                setEditing(false);
-              }}
+              onPress={() =>
+                confirmAction(
+                  'Xoá chủ đề',
+                  `Xoá "${sel.name}"? Các liên kết với chủ đề này sẽ bị gỡ, buổi học vẫn được giữ.`,
+                  () => {
+                    deleteTopic(sel.id);
+                    setSelected(null);
+                    setEditing(false);
+                  },
+                  'Xoá',
+                )
+              }
               style={{ flex: 1 }}
             />
           </View>
         </Card>
       )}
+
+      <TaskEditor visible={!!editingTask} task={editingTask} defaultDate={todayISO()} onClose={() => setEditingTask(null)} />
     </Screen>
   );
 }

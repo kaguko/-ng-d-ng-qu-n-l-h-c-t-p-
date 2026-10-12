@@ -4,14 +4,14 @@
 Tích hợp **Google Gemini** bằng API key do chính người dùng nhập – key lưu trong Keychain/Keystore của máy (`expo-secure-store`), gọi thẳng từ thiết bị tới Google, không qua máy chủ trung gian.
 
 ## Tính năng
-- **Hôm nay**: tiến độ buổi học, thời gian tập trung so với mục tiêu, chuỗi ngày học (🔥), điểm chất lượng, lối tắt tới Tập trung / Hỏi Lumo. Nút *"AI xếp lại lịch"* tự dời các buổi bị lỡ.
-- **Lịch**: dạng **lưới tuần** (ngày × giờ, ô màu theo môn, buổi trùng giờ xếp cạnh nhau) hoặc danh sách theo ngày; thêm/sửa/xoá, đánh dấu hoàn thành.
+- **Hôm nay**: thẻ *Tiếp theo* (buổi đang diễn ra / sắp tới, bấm là vào Tập trung), tiến độ buổi học, thời gian tập trung so với mục tiêu, chuỗi ngày học (🔥), điểm chất lượng, lối tắt tới Tập trung / Hỏi Lumo. Nút *"AI xếp lại lịch"* tự dời các buổi bị lỡ. Ngày/giờ tự cập nhật khi để app mở qua đêm hoặc quay lại từ nền.
+- **Lịch**: dạng **lưới tuần** (ngày × giờ, ô màu theo môn, buổi trùng giờ xếp cạnh nhau; chạm ô trống để thêm buổi đúng giờ đó) hoặc danh sách theo ngày; thêm/sửa/xoá (có *Hoàn tác*), đánh dấu hoàn thành. Nhãn chủ đề trên mỗi buổi học mở thẳng chủ đề đó trên Bản đồ.
 - **AI**: mô tả mục tiêu + khoảng ngày + giờ rảnh → Gemini tạo lịch **và bản đồ kiến thức** (chủ đề + liên kết tiên quyết). Một bộ xếp lịch xác định sửa lại kết quả của AI (khung giờ, không trùng, nghỉ giữa buổi, trần giờ/ngày, không xếp vào quá khứ).
 - **Bản đồ**: đồ thị kiến thức dạng phân tầng, đường liên kết có mũi tên, nút tô theo mức thành thạo (chưa học / đang học / nắm vững), khoá chủ đề chưa đủ tiên quyết. Chạm một nút để xem buổi học, chủ đề trước/sau, "Học ngay", sửa liên kết; có "AI gợi ý liên kết".
 - **Thống kê**: điểm chất lượng học 0–100 (hoàn thành 40% + đều đặn 30% + đạt mục tiêu 20% + tự đánh giá 10%), phút tập trung 14 ngày, heatmap 12 tuần, thời gian theo môn, xu hướng tự đánh giá, tiến độ theo môn.
-- **Tập trung**: Pomodoro tính theo mốc thời gian, bấm "Học ngay" từ một buổi để tự hoàn thành buổi đó; sau mỗi phiên tự đánh giá 1–5.
+- **Tập trung**: Pomodoro tính theo mốc thời gian, chạy toàn cục — rời màn hình hay tắt app vẫn giữ phiên, dải nổi trên thanh tab hiện đồng hồ và nút tạm dừng ở mọi tab; hết giờ thì tự ghi nhật ký (kể cả khi app đang tắt) và báo bằng thông báo (bản APK). Bấm "Học ngay" từ một buổi để tự hoàn thành buổi đó; sau mỗi phiên tự đánh giá 1–5.
 - **Hỏi Lumo**: huấn luyện viên AI trả lời dựa trên lịch, tiến độ và chuỗi ngày học của bạn.
-- **Cài đặt**: nhập/kiểm tra API key, chọn model, mục tiêu ngày, nhắc giờ học (cần APK / development build), quản lý môn học.
+- **Cài đặt**: nhập/kiểm tra API key, chọn model, mục tiêu ngày, nhắc giờ học (cần APK / development build), thêm/xoá môn học, **sao lưu & khôi phục** dữ liệu (JSON qua trình chia sẻ, không chứa API key; dữ liệu được kiểm tra và làm sạch trước khi khôi phục).
 
 ## Chạy thử
 ```bash
@@ -33,5 +33,7 @@ npx eas-cli@latest build -p android --profile preview   # build APK/AAB trên cl
 src/app/            màn hình (Expo Router, tabs)
 src/components/     UI dùng chung
 src/lib/gemini.ts   gọi Gemini (JSON schema + kiểm tra đầu ra)
-src/store.tsx       state + lưu AsyncStorage
+src/lib/data.ts     kiểm tra/làm sạch dữ liệu, sao lưu & khôi phục
+src/lib/focus.ts    tính giờ phiên tập trung
+src/store.tsx       state + lưu AsyncStorage (gồm phiên tập trung đang chạy)
 ```

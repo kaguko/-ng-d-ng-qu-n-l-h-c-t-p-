@@ -6,6 +6,7 @@ import { addDays, formatLong, fromMinutes, toMinutes } from '@/lib/date';
 import { useStore } from '@/store';
 import { colors } from '@/theme';
 import { Task } from '@/types';
+import { useToast } from './Toast';
 import { Button, Chip, Field, Stepper } from './ui';
 
 type Draft = {
@@ -23,22 +24,36 @@ export function TaskEditor({
   visible,
   task,
   defaultDate,
+  defaultStart,
   onClose,
 }: {
   visible: boolean;
   task: Task | null;
   defaultDate: string;
+  /** giờ bắt đầu gợi ý khi thêm mới (VD chạm vào ô trống trên lưới tuần) */
+  defaultStart?: string;
   onClose: () => void;
 }) {
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      {visible ? <EditorForm task={task} defaultDate={defaultDate} onClose={onClose} /> : null}
+      {visible ? <EditorForm task={task} defaultDate={defaultDate} defaultStart={defaultStart} onClose={onClose} /> : null}
     </Modal>
   );
 }
 
-function EditorForm({ task, defaultDate, onClose }: { task: Task | null; defaultDate: string; onClose: () => void }) {
-  const { subjects, topics, addTask, updateTask, deleteTask } = useStore();
+function EditorForm({
+  task,
+  defaultDate,
+  defaultStart,
+  onClose,
+}: {
+  task: Task | null;
+  defaultDate: string;
+  defaultStart?: string;
+  onClose: () => void;
+}) {
+  const { subjects, topics, addTask, updateTask, deleteTask, restoreTask } = useStore();
+  const toast = useToast();
   const [d, setD] = useState<Draft>(() =>
     task
       ? {
@@ -50,7 +65,7 @@ function EditorForm({ task, defaultDate, onClose }: { task: Task | null; default
           duration: task.duration,
           note: task.note ?? '',
         }
-      : { title: '', subjectId: null, topicId: undefined, date: defaultDate, start: '19:00', duration: 45, note: '' },
+      : { title: '', subjectId: null, topicId: undefined, date: defaultDate, start: defaultStart ?? '19:00', duration: 45, note: '' },
   );
 
   const save = () => {
@@ -66,6 +81,7 @@ function EditorForm({ task, defaultDate, onClose }: { task: Task | null; default
     };
     if (task) updateTask(task.id, payload);
     else addTask(payload);
+    toast(task ? 'Đã lưu thay đổi' : 'Đã thêm buổi học');
     onClose();
   };
 
@@ -147,8 +163,14 @@ function EditorForm({ task, defaultDate, onClose }: { task: Task | null; default
                 icon='trash-outline'
                 variant='danger'
                 onPress={() => {
-                  deleteTask(task.id);
+                  const removed = deleteTask(task.id);
                   onClose();
+                  if (removed) {
+                    toast(`Đã xoá "${removed.title}"`, {
+                      icon: 'trash-outline',
+                      action: { label: 'Hoàn tác', onPress: () => restoreTask(removed) },
+                    });
+                  }
                 }}
               />
             )}
