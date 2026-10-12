@@ -19,11 +19,18 @@ type CallOpts = {
 // sẽ báo lỗi 400 nhắc tới thinking; ghi nhớ để các lần sau gửi thẳng không kèm tuỳ chọn này.
 const thinkingLocked = new Set<string>();
 
+class OverloadedError extends GeminiError {}
+class TimeoutError extends OverloadedError {}
+
 async function post(opts: CallOpts, thinkingOff: boolean): Promise<Response> {
   const { apiKey, model, system, messages, schema, temperature = 0.6 } = opts;
+  // Quá thời gian chờ thì huỷ để người dùng không phải nhìn vòng quay vô tận.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), schema ? 75_000 : 30_000);
   try {
     return await fetch(`${BASE}/${encodeURIComponent(model.trim())}:generateContent`, {
       method: 'POST',
+      signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey.trim() },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
@@ -37,7 +44,10 @@ async function post(opts: CallOpts, thinkingOff: boolean): Promise<Response> {
       }),
     });
   } catch {
+    if (ctrl.signal.aborted) throw new TimeoutError('Gemini phản hồi quá lâu. Thử lại sau ít phút.');
     throw new GeminiError('Không kết nối được tới Gemini. Kiểm tra mạng rồi thử lại.');
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -48,8 +58,6 @@ async function errorDetail(res: Response): Promise<string> {
     return '';
   }
 }
-
-class OverloadedError extends GeminiError {}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Model dự phòng khi model đang chọn quá tải (503) kéo dài.
@@ -99,6 +107,7 @@ async function callGemini(opts: CallOpts): Promise<string> {
       } catch (e) {
         if (!(e instanceof OverloadedError)) throw e;
         last = e;
+        if (e instanceof TimeoutError) break; // model này đang chậm: sang model khác ngay
         if (attempt === 0) await sleep(1500);
       }
     }
