@@ -64,7 +64,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 async function callModel(opts: CallOpts): Promise<string> {
-  const { apiKey, model } = opts;
+  const { model } = opts;
 
   const modelKey = model.trim();
   let res = await post(opts, !thinkingLocked.has(modelKey));
