@@ -49,9 +49,14 @@ async function errorDetail(res: Response): Promise<string> {
   }
 }
 
-async function callGemini(opts: CallOpts): Promise<string> {
+class OverloadedError extends GeminiError {}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Model dự phòng khi model đang chọn quá tải (503) kéo dài.
+const FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+
+async function callModel(opts: CallOpts): Promise<string> {
   const { apiKey, model } = opts;
-  if (!apiKey) throw new GeminiError('Chưa có API key. Vào Cài đặt để nhập key Gemini của bạn.');
 
   const modelKey = model.trim();
   let res = await post(opts, !thinkingLocked.has(modelKey));
@@ -67,6 +72,7 @@ async function callGemini(opts: CallOpts): Promise<string> {
     if (res.status === 400 && /api key/i.test(detail)) throw new GeminiError('API key không hợp lệ.');
     if (res.status === 401 || res.status === 403) throw new GeminiError('API key bị từ chối hoặc chưa được cấp quyền.');
     if (res.status === 404) throw new GeminiError(`Không tìm thấy model "${model}". Hãy đổi model trong Cài đặt.`);
+    if (res.status === 500 || res.status === 503 || res.status === 504) throw new OverloadedError('Gemini đang quá tải. Thử lại sau ít phút.');
     if (res.status === 429) throw new GeminiError('Đã vượt hạn mức của API key. Đợi một lúc rồi thử lại.');
     throw new GeminiError(`Gemini báo lỗi ${res.status}${detail ? `: ${detail}` : ''}`);
   }
@@ -79,6 +85,25 @@ async function callGemini(opts: CallOpts): Promise<string> {
     throw new GeminiError(`Gemini không trả về nội dung${why ? ` (${why})` : ''}.`);
   }
   return text;
+}
+
+async function callGemini(opts: CallOpts): Promise<string> {
+  if (!opts.apiKey) throw new GeminiError('Chưa có API key. Vào Cài đặt để nhập key Gemini của bạn.');
+  const chosen = opts.model.trim();
+  const models = [chosen, ...FALLBACK_MODELS.filter((m) => m !== chosen)];
+  let last: unknown;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await callModel({ ...opts, model });
+      } catch (e) {
+        if (!(e instanceof OverloadedError)) throw e;
+        last = e;
+        if (attempt === 0) await sleep(1500);
+      }
+    }
+  }
+  throw last;
 }
 
 function parseJSON<T>(text: string): T {
