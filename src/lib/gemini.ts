@@ -13,6 +13,8 @@ type CallOpts = {
   messages: ChatMessage[];
   schema?: object;
   temperature?: number;
+  /** kiểm tra kết nối: hết giờ sớm và báo lỗi ngay khi mạng treo */
+  quick?: boolean;
 };
 
 // Tắt chế độ "suy nghĩ" để phản hồi nhanh hơn nhiều. Model không cho tắt (vd. dòng Pro)
@@ -26,7 +28,7 @@ async function post(opts: CallOpts, thinkingOff: boolean): Promise<Response> {
   const { apiKey, model, system, messages, schema, temperature = 0.6 } = opts;
   // Quá thời gian chờ thì huỷ để người dùng không phải nhìn vòng quay vô tận.
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), schema ? 75_000 : 30_000);
+  const timer = setTimeout(() => ctrl.abort(), opts.quick ? 12_000 : schema ? 75_000 : 30_000);
   try {
     return await fetch(`${BASE}/${encodeURIComponent(model.trim())}:generateContent`, {
       method: 'POST',
@@ -107,6 +109,7 @@ async function callGemini(opts: CallOpts): Promise<string> {
       } catch (e) {
         if (!(e instanceof OverloadedError)) throw e;
         last = e;
+        if (e instanceof TimeoutError && opts.quick) throw e; // kiểm tra kết nối: báo ngay, đừng bắt người dùng chờ
         if (e instanceof TimeoutError) break; // model này đang chậm: sang model khác ngay
         if (attempt === 0) await sleep(1500);
       }
@@ -144,6 +147,7 @@ export async function testConnection(apiKey: string, model: string): Promise<voi
     model,
     system: 'Trả lời đúng một từ.',
     messages: [{ role: 'user', text: 'Nói "ok".' }],
+    quick: true,
   });
 }
 

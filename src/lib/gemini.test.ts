@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { GeminiError, testConnection } from './gemini';
+import { GeminiError, coachReply, testConnection } from './gemini';
+
+const coach = (model = 'gemini-flash-latest') => coachReply({ apiKey: 'k', model, context: '', history: [{ role: 'user', text: 'hi' }] });
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -23,19 +25,19 @@ function mock(responses: (() => Response)[]) {
 
 test('503 một lần rồi thành công: thử lại cùng model', async () => {
   const models = mock([() => err(503), ok]);
-  await testConnection('k', 'gemini-flash-latest');
+  await coach();
   assert.deepEqual(models, ['gemini-flash-latest', 'gemini-flash-latest']);
 });
 
 test('model đang chọn quá tải kéo dài: chuyển sang model dự phòng', async () => {
   const models = mock([() => err(503), () => err(503), ok]);
-  await testConnection('k', 'gemini-flash-latest');
+  await coach();
   assert.equal(models.at(-1), 'gemini-2.5-flash');
 });
 
 test('mọi model đều quá tải: báo lỗi thân thiện, không treo', async () => {
   mock([() => err(503, 'high demand')]);
-  await assert.rejects(testConnection('k', 'gemini-flash-latest'), (e: Error) => {
+  await assert.rejects(coach(), (e: Error) => {
     assert.ok(e instanceof GeminiError);
     assert.match(e.message, /quá tải/);
     return true;
@@ -75,8 +77,21 @@ test('model treo quá lâu: huỷ rồi chuyển model dự phòng', async (t) =
     if (models.length > 1) return Promise.resolve(ok());
     return new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted'))));
   }) as typeof fetch;
-  const p = testConnection('k', 'gemini-flash-latest');
+  const p = coach();
   t.mock.timers.tick(30_000);
   await p;
   assert.deepEqual(models, ['gemini-flash-latest', 'gemini-2.5-flash']);
+});
+
+test('kiểm tra kết nối khi mạng treo: huỷ sau 12 giây và báo ngay, không thử model khác', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const models: string[] = [];
+  globalThis.fetch = ((url: string, init: RequestInit) => {
+    models.push(/models\/([^:]+):/.exec(url)![1]);
+    return new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(new Error('aborted'))));
+  }) as typeof fetch;
+  const p = assert.rejects(testConnection('k', 'gemini-flash-latest'), /quá lâu/);
+  t.mock.timers.tick(12_000);
+  await p;
+  assert.equal(models.length, 1);
 });
